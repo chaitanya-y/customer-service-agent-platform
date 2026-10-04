@@ -1,14 +1,14 @@
 # Local Authentication and Secrets
 
-Last updated: 2026-09-14
+Last updated: 2026-10-02
 
 ## The simple mental model
 
 The project does not require you to manually manage many live tokens.
 
-You configure several independent signing secrets once. You manually generate two
-local login tokens. The services then generate short-lived internal assertions
-automatically for each request.
+You configure several independent signing secrets once. You manually generate a
+local login token for each enabled customer or staff role. The services then
+generate short-lived internal assertions automatically for each request.
 
 ```text
 Signing secret configured in service .env
@@ -21,7 +21,7 @@ A secret is a long-lived local key used to sign or verify. A token is a signed,
 time-limited message that carries claims. The signature lets the receiver detect
 whether anyone changed those claims.
 
-## The two tokens you generate manually
+## Local tokens you generate manually
 
 ### Customer login token
 
@@ -71,8 +71,57 @@ generator lifetime is 30 days (2592000 seconds), changed from seven days on
 September 21, 2026 for local development. The CLI defaults to 30 days and refuses
 a longer configured lifetime. Set `LOCAL_HUMAN_ACCESS_TTL_SECONDS=2592000` in
 `apps/services/human-operations/.env`; an older value would keep generating
-shorter tokens despite the new default. Human Operations verifies the
-token signature, expiry, issuer, audience, tenant, environment, and staff role.
+shorter tokens despite the new default. Human Operations now requires both
+integer `iat` and `exp`, rejects expired or over-30-day issued lifetimes and
+issued-at times more than 30 seconds in the future, and still verifies the
+signature, JWT type, issuer, audience, tenant, environment, and staff role.
+Tokens without these lifetime claims, previously accepted by the refund-staff
+verifier, are no longer valid. Existing generated 30-day local tokens remain
+valid until their own expiry.
+
+### Separate delivery staff token
+
+The delivery report queue does not accept the refund staff token above. From
+`apps/services/human-operations`, generate a delivery-scoped JWT with
+`pnpm --silent local:delivery-token`. Set its output as
+`CSO_LOCAL_DELIVERY_STAFF_TOKEN` in the Operations Console's effective private
+environment and restart that console. This JWT uses the existing
+`HUMAN_ACCESS_HMAC_SECRET` but has a different JWT type, audience
+(`human-operations-delivery-staff`), allowed roles (`DELIVERY_AGENT` or
+`DELIVERY_SUPERVISOR`), and HTTP header. Its local default and maximum
+lifetime are 30 days. No delivery token should be copied into customer or
+refund-token variables. The browser receives only a separate HTTP-only local
+delivery session cookie, not the token itself.
+
+### Separate chat support staff token
+
+Human chat handoff uses a third staff role, `SUPPORT_AGENT`, not the refund or
+delivery role. Generate it from `apps/services/human-operations` with
+`pnpm --silent local:support-token`, place it only in Operations Console's
+effective private environment as `CSO_LOCAL_SUPPORT_STAFF_TOKEN`, and restart
+that console. The JWT uses the existing Human Operations login signing secret,
+but has a distinct type (`cso-support-staff+jwt`), audience
+(`human-operations-support-staff`), role and HTTP header. Its local default and
+maximum lifetime are 30 days. A support agent cannot use it to approve a refund
+or acknowledge a delivery report. The browser receives a separate HTTP-only
+support session cookie, never this token.
+
+Separately, Human Operations signs a short-lived assertion for Conversation
+Runtime on each staff read or action. It uses a **new, distinct**
+`CONVERSATION_STAFF_ASSERTION_HMAC_SECRET` shared only between those two
+services. This is a configured signing secret, not a token you renew or paste
+into a browser. The assertion binds the verified staff identity, tenant,
+environment, purpose, route, and for mutations the handoff session, state
+version, idempotency key and request-body digest. It expires after at most five
+minutes; the current signer uses 60 seconds. Only an exact verified assertion
+allows Conversation Runtime to show or modify a staff chat.
+
+Human handoff remains disabled by default. Set `HUMAN_CHAT_HANDOFF_ENABLED=true`
+in Edge and Customer Portal only after the Conversation Runtime migration,
+staff signing configuration, Human Operations support routes, and staffed
+console are live. The disabled default prevents customers from being queued
+without anyone able to claim the conversation. See
+[human chat handoff](HUMAN_CHAT_HANDOFF_JOURNEY.md).
 
 The two Next.js applications keep these server-side and expose only an HTTP-only
 local session cookie to the browser. Browser JavaScript does not need the raw JWT.
@@ -149,9 +198,10 @@ must use a different random value from every other row.
 | Secret | Where it is configured | What it protects |
 |---|---|---|
 | `LOCAL_AUTH_HMAC_SECRET` | Edge API only | Local customer login token |
-| `HUMAN_ACCESS_HMAC_SECRET` | Human Operations only | Local staff login token |
-| `CONTEXT_ASSERTION_HMAC_SECRET` | Edge API, Conversation Runtime, Integration Gateway, Agent Runtime, Knowledge/RAG, Human Operations when photo intake is enabled | Local audience-specific customer context assertions; values must match |
+| `HUMAN_ACCESS_HMAC_SECRET` | Human Operations only | Local refund, delivery, and support staff login tokens with distinct types/audiences/roles |
+| `CONTEXT_ASSERTION_HMAC_SECRET` | Edge API, Conversation Runtime, Integration Gateway, Agent Runtime, Knowledge/RAG, Human Operations | Local audience-specific customer context assertions, including delivery report create/read; values must match |
 | `EDGE_SERVICE_ASSERTION_HMAC_SECRET` | Edge API and Conversation Runtime | Assistant-message commits; values must match |
+| `CONVERSATION_STAFF_ASSERTION_HMAC_SECRET` | Human Operations and Conversation Runtime | Short-lived, action-bound chat staff assertions; values must match |
 | `WORKFLOW_ACCESS_HMAC_SECRET` | Workflow Workers and Integration Gateway | Fact refresh, refund execution, and reconciliation; values must match |
 | `HUMAN_OPERATIONS_WORKFLOW_HMAC_SECRET` | Workflow Workers and Human Operations | Worker-only case open/close and bound evidence read/transition; values must match |
 | `PROVIDER_WEBHOOK_HMAC_SECRET` | Integration Gateway and the local provider adapter/test sender | Signed provider outcome events |
@@ -177,12 +227,21 @@ verification key.
 |---|---|
 | `OPENAI_API_KEY` | External credential used by Agent Runtime and embedding/answer paths that call OpenAI |
 | `VENDURE_API_KEY` | External commerce credential used by Integration Gateway |
+| `VENDURE_CHANNEL_TOKEN` | Vendure channel-selection credential used by the Gateway's commerce adapters; keep it separate from the API key |
+| `VENDURE_CHANNEL_CODE` | Expected channel identifier checked against Vendure responses; configuration, not a signing secret |
 | `MESSAGE_ENCRYPTION_KEY_BASE64` | Exactly 32 random bytes encoded as base64; encrypts stored conversation text and is not a JWT signing secret |
 | `DATABASE_URL` | Runtime database credential with restricted application permissions |
 | `MIGRATION_DATABASE_URL` | More privileged local migration credential; do not use it as the normal runtime account |
 
 Do not place any real value in documentation, source code, fixtures, test output,
 screenshots, issues, or Git history.
+
+The local Gateway is configured for one tenant/channel pair per running
+instance. A valid API key alone is not a tenant selector: it must be combined
+with that tenant's Vendure channel token, and channel-aware reads must verify
+the returned `activeChannel.code`. A missing or mismatched binding fails
+closed. These local variables do not create a dynamic per-request tenant
+registry or prove isolation for every future commerce mutation.
 
 ## Why the same name appears in several `.env` files
 
@@ -213,6 +272,11 @@ Portal was not restarted after `.env` changed.
 `Human authorization is required` usually means the staff token is missing,
 expired, signed with a different `HUMAN_ACCESS_HMAC_SECRET`, or the Operations
 Console was not restarted after `.env` changed.
+
+The delivery queue's authorization error can also mean the **delivery** token
+is absent, expired, or mistakenly replaced with a refund staff token. Renewal
+uses the delivery-token CLI; rotating the signing secret would invalidate all
+three local staff-token types.
 
 An internal `401` or `403` usually means one of the paired service secrets differs,
 an issuer/audience differs, the token expired, or tenant/environment claims do not
@@ -246,3 +310,6 @@ Local tokens are a development adapter, not the intended AWS identity system.
 - Internal assertions will use separate audiences and preferably asymmetric keys.
 - The application route and verified identity interfaces can remain stable, so the
   project does not need to rewrite the business workflow for production auth.
+
+See [the production identity roadmap](PRODUCTION_IDENTITY_ROADMAP.md) for the
+current shared-local-session limitation, replacement seams, and test gates.

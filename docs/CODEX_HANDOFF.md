@@ -1,6 +1,228 @@
 # Codex Handoff
 
-Last updated: 2026-09-20
+Last updated: 2026-10-02
+
+## Current uncommitted local checkpoint
+
+The real repository is the `customer-service-OS-lite` checkout on `dev`, not
+the older `Customer-Service-OS` folder. It has extensive pre-existing dirty
+work; preserve it and do not stage everything, reset, or infer that these
+October changes are on `main`. The current journey boundaries are in
+[NEXT_JOURNEY_BOUNDARIES.md](NEXT_JOURNEY_BOUNDARIES.md) and exact checks in
+[VERIFICATION_STATUS.md](VERIFICATION_STATUS.md).
+
+Edge API, Integration Gateway, Conversation Runtime, Workflow Workers, Human
+Operations, Customer Portal, Operations Console, Admin Console, Python Agent Runtime, and Knowledge/RAG now have isolated local container
+packaging proofs. Gateway's
+53-file and Conversation's 25-file staged builds passed offline audits; neither
+was started as a service. A compiled Workflow Worker entrypoint mismatch was
+corrected and verified with 113 Worker tests and a build; its image then
+bundled emitted workflows offline with zero source-map warnings after embedding
+source content in the maps, but no Temporal
+server or history replay. Human Operations' image loaded six migrations and
+processed a synthetic image with Sharp, but performed no database migration or
+case action. Agent Runtime's image imported FastAPI and exercised only its
+local ASGI health route; no model or gateway call ran. The full image-proof
+staging and negative-input suite passed 39/39. A shared guard rejects
+symlinked ancestors and hidden/sensitive source components in the previously
+unguarded recipes; concurrent filesystem mutation is outside its scope.
+The Customer Portal standalone image compiled and passed an offline route,
+static-asset and native Sharp audit, but no server or authenticated customer
+journey ran. Production still disables local customer login.
+The Operations Console image likewise compiled and passed an offline audit,
+but production disables its local staff logins. `control-knowledge` is a
+contracts-only package, not a missing HTTP service image.
+The Admin Console image contains only its unauthenticated placeholder page;
+this is not a usable control plane.
+Multi-service startup and production identity remain deployment gates;
+see [AWS deployment readiness](AWS_DEPLOYMENT_READINESS.md).
+
+Knowledge/RAG's Linux lock now selects official CPU-only PyTorch wheels for
+arm64 and x86_64 instead of the previous CUDA dependency graph. Its reviewed
+35-file recipe built and passed an offline arm64 import and ASGI health audit;
+155 Knowledge/RAG tests, Ruff, and the offline lock check passed. This did not
+run lifespan or retrieval. A separate network-disabled image run mounted the
+existing pinned model cache read-only and scored two synthetic sentences on
+CPU. The weights were not downloaded or packaged, and configured
+OpenSearch/retrieval and multi-container smokes remain unproven.
+The follow-up RAG image defaults `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1`; its verifier checks the actual image metadata.
+The refreshed arm64 build and offline dependency/ASGI health audit passed,
+as did 6/6 focused verifier tests. Missing pinned weights now fail closed
+at startup. An approved, checksum-verified runtime model asset and configured
+retrieval proof are still needed before deployment.
+The opt-in amd64 build also passed a network-disabled, read-only, non-root
+dependency/ASGI health audit (353,963,008-byte image). It did not load the
+model in that audit or run configured retrieval. A separate offline amd64
+run mounted the exact pinned cache read-only and passed synthetic two-sentence
+model ranking. See [AWS deployment readiness](AWS_DEPLOYMENT_READINESS.md)
+for the test-harness incident and exact proof boundary.
+
+The newest read-only support audit found duplicate provider payment/refund
+IDs could overstate an aggregate, and cancelled-order item history could be
+worded as current contents. Gateway now returns `UNCERTAIN` for repeated or
+missing payment/refund IDs and refuses OrderItems v1 for cancelled orders.
+Agent Runtime then gives its safe source-unavailable answer; a future versioned
+history contract is required for historical item wording. Gateway 352/352,
+Agent Runtime 626/626 and root contracts 112/112 passed after these fixes.
+
+One 2026-10-02 synthetic large-refund RAGAS case was run twice with current
+code: the first answer was rejected by the delivery-age guard before judging,
+and the second yielded the reviewed $750/$500 specialist-review sentence and
+passed blocking checks. Its non-blocking response-relevancy score was 0.5516.
+This is not a passing repeated-reliability baseline; no further paid retries
+were started. Exact usage, code/artifact hashes, and limitations are in the
+[diagnostic record](evaluation/RAGAS_LARGE_REFUND_2026_10_02.md). A
+[model-free amount-answer design](superpowers/specs/2026-10-02-deterministic-refund-amount-answer.md)
+is proposed but **not implemented**; the existing answer guard remains active.
+
+The refund reference journey remains locally proven through dummy-provider
+settlement. Since September 20, read-only order/item/payment/catalog and
+account-discovery slices, staff chat, delivery reporting, and a tightly scoped
+zero-total cancellation have been added locally. Delivery staff can now close
+an acknowledged report's **review** without claiming a delivery remedy;
+migration 006 is applied to the local Human Operations database. One
+disposable report passed authenticated backend claim, acknowledgment, closure,
+replay/conflict, six-field customer readback, and audit checks; browser QA is
+still required. Three generic exchange
+questions now give only a cited conditional return rule and explicitly decline
+to verify/approve an exchange. One authenticated local chat exercised all
+three with no commerce workflow link; a six-case synthetic Evaluation Runner
+v4 set passed 12/12 repeated trials. This is not an operational exchange
+journey. See [the return discussion note](RETURN_EXCHANGE_DISCUSSION.md).
+
+The owned-order status answer now pairs each code with the correct
+fulfillment in multi-shipment orders and fails closed on control characters.
+The read-only refund-status answer now distinguishes aggregate order status
+from an individual failed/cancelled attempt; one authenticated local chat
+verified the caveat with no workflow link. The latest full Agent Runtime
+suite passed 570 tests. A separate, deterministic
+[read-only order-total journey](ORDER_TOTAL_JOURNEY.md) now answers the
+owner-checked current tax-inclusive total without equating it to amount paid
+or an invoice. Its authenticated local Edge turn and two-message persisted
+transcript passed with no workflow link. Vendure has no authoritative carrier
+URL/ETA in this simulator, and there is no owner-checked invoice document source.
+See [next journey boundaries](NEXT_JOURNEY_BOUNDARIES.md). The app browser's
+saved permission blocks agent access to the local support URL, so visual QA
+remains a human walkthrough; do not work around that preference.
+
+The synthetic v5 status-clarity evaluation passed 12/12 trials; the separate
+[v6 order-total evaluation](evaluation/READ_ONLY_ORDER_TOTAL_V6.md) passed
+20/20 repeated synthetic trials. The new deterministic
+[catalog-price journey](CATALOG_PRICE_JOURNEY.md) quotes only one exact named
+variant's tenant-channel `priceWithTax` and keeps it separate from checkout,
+payment, and order totals. A product with one published variant can name and
+quote that variant; multiple variants require clarification. Its
+[v7 offline evaluation](evaluation/READ_ONLY_CATALOG_PRICE_V7.md) passed
+20/20 repeated synthetic trials. At that checkpoint the full Evaluation
+Runner suite passed 319 tests. Its older v2 fixture is preserved with two exact historical case drifts
+(failed-refund wording and generic-return retrieval query, two trials each).
+Knowledge/RAG now has
+a verified-TLS/basic-auth remote OpenSearch option (149 tests and a local
+ping passed), but no AWS remote handshake or SigV4 support. See the
+[evaluation note](evaluation/READ_ONLY_STATUS_CLARITY_V5.md) and
+[deployment gate](AWS_DEPLOYMENT_READINESS.md).
+Subsequent authenticated local Edge chats gave the named laptop variant's
+catalog price and correctly clarified a four-variant product, each with a
+two-turn transcript and no commerce action. A separate same-channel Vendure
+Shop Search read matched the named price. Browser rendering, exact tool-call
+count, and live reliability remain unverified; see
+[the catalog journey](CATALOG_PRICE_JOURNEY.md).
+
+The same authenticated chat now also has a narrowly phrased
+[recent-order-reference answer](RECENT_ORDER_REFERENCES_JOURNEY.md). It reads
+at most ten owner-checked placed-order references through a zero-argument,
+signed Gateway MCP tool and never treats the list as full history, shipping
+status, payment, or refund eligibility. The [v8 offline evaluation](evaluation/READ_ONLY_RECENT_ORDERS_V8.md)
+passed 24/24 repeated synthetic trials across twelve cases; the full Evaluation Runner suite is
+now 324 passed. Agent Runtime 622, Edge 172, Gateway 350 and root contracts
+112 passed. Gateway/Edge typechecks and Gateway build passed. One
+authenticated local Edge backend chat passed after Agent Runtime restart;
+browser rendering and an independent provider-row audit remain pending. All
+three Agent Runtime MCP clients now accept the same configurable private
+Gateway URL, but cross-container communication remains unverified. This
+work is uncommitted and did not touch the unrelated ignored demo app.
+
+Knowledge/RAG's DOCX parser-v1 now rejects sources with top-level tables
+instead of publishing incomplete paragraph-only evidence. The full parser
+suite passed 150 tests; no index or release was rebuilt. Full table extraction
+needs parser-v2 and a new immutable release. See the
+[DOCX boundary](DOCX_TABLE_INGESTION_BOUNDARY.md).
+
+The three exact generic return-policy phrasings now use a targeted
+change-of-mind retrieval query, while still requiring the exact conditional
+customer-safe sentence and citation before answering. A red-first query
+regression across all three phrasings and full Agent Runtime suite (567 passed
+at that checkpoint)
+verified the change. A bounded follow-up sent each exact phrasing once through
+a fresh authenticated local Edge conversation; all three returned the
+conditional rule and policy title without a workflow link. Three first-turn
+passes are not a statistically meaningful reliability estimate or a new
+policy source.
+
+Edge now centrally rejects malformed or mismatched identities returned by its
+injected customer verifier before workflow reads or Agent Runtime intake. The
+two red-first regressions, full Edge suite (171 passed), and typecheck passed.
+This is a local trust-boundary prerequisite only; the browser's shared local
+cookie/token and production OIDC/account mapping remain unimplemented.
+
+The final-sale RAGAS case was diagnosed without a commerce mutation: a v12
+answer broadened the 14-day return rule by omitting “unopened,” and the
+production delivery-window guard correctly rejected it. Prompt v13 then
+passed one configured blocking trial, but its answer made an unverified
+customer-specific refund denial and RAGAS faithfulness was 0.25. This is a
+quality failure despite `pass_rate=1.0`. A red-first regression now makes the
+answer guard reject that denial; the 570-test Agent Runtime suite and Ruff
+checks pass. The paid v13 trial predates the guard fix. One later bounded
+post-guard trial was unscored: `DELIVERY_AGE_TEXT_REJECTED` stopped it before
+judges, with no rejected answer retained and no identical retry. Preserve the
+exact trial and usage provenance in
+[RAGAS_CLOSURE_REVIEW.md](evaluation/RAGAS_CLOSURE_REVIEW.md); do not claim
+RAGAS completion or production answer reliability.
+
+The refund staff verifier now rejects JWTs lacking bounded `iat`/`exp`;
+existing 30-day generated tokens still work. Its Human Operations suite
+passed 98 tests with 10 database tests skipped when the test URL was unset.
+The running local service accepted the current expiring staff token and
+rejected a signed non-expiring synthetic token on read-only requests. This
+does not solve production OIDC or identity-bound web sessions; see
+[the identity roadmap](PRODUCTION_IDENTITY_ROADMAP.md).
+
+The latest offline checks include Human Operations 98 passed with 10 optional
+database tests skipped when its test URL was unset (an earlier isolated
+PostgreSQL delivery-closure run passed 74/74), Edge 171/171, Customer Portal
+153/153, Operations Console 74/74,
+Agent Runtime 622 passed, Integration Gateway 350 passed, Evaluation Runner
+324 passed, and 112 canonical
+contracts. Changed-app typechecks/builds and relevant Ruff checks passed.
+Running project services were healthy at the last read-only readiness check;
+token metadata was future-dated but signatures were not verified by that
+check. No AWS deployment, production identity, real payment provider,
+official Tau-bench run, or LangSmith export is claimed. Do not use the older
+checkpoint below as current branch status.
+
+The `dev` checkout remains heavily dirty (414 modified/untracked paths at the
+2026-10-02 read). These include work predating the current autonomous pass.
+Nothing in this pass was committed, pushed, merged, reset, or discarded; do
+not stage all changes indiscriminately. Unrelated ignored demo-app files remain
+outside the intended core-project commit scope.
+
+An [AWS readiness audit](AWS_DEPLOYMENT_READINESS.md) confirms that production
+identity, the remaining application images/IaC, cloud search integration, durable cloud
+dependencies, private evidence storage, and production operations are still
+missing. No AWS account or resource was used in this checkpoint; local dummy
+refund success is not deployment readiness.
+
+A pinned, production-dependency Edge API image passed an opt-in local Docker
+build and private runtime audit after its proof script switched to an explicit
+405 kB staged context. The image is non-root, Node 24, contains no sensitive
+paths or development dependencies, answered private `/health`, and shut down
+cleanly. The test container/network were removed; the image remains locally.
+Docker's normal credential configuration was not changed. This is **not** an
+AWS or production-ready deployment; see the
+[deployment readiness gate](AWS_DEPLOYMENT_READINESS.md).
+
+## Historical 2026-09-20 checkpoint
 
 Current checkpoint: authoritative refund observability is committed on `dev` as
 `082beee` and merged to `main` as `c75dd51`. The local implementation includes

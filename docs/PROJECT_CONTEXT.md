@@ -1,6 +1,6 @@
 # Customer Service Agent Platform: Project Context and Contributor Handoff
 
-Last updated: 2026-09-20
+Current-status note added: 2026-10-04; detailed baseline below is dated 2026-09-20
 Repository: <https://github.com/chaitanya-y/customer-service-agent-platform>
 Active implementation branch: `dev`
 
@@ -19,7 +19,19 @@ Read it before changing code. It records:
 
 No credentials or `.env` values belong in this file or in Git.
 
-Current checkpoint: the authoritative refund observability batch is committed
+This file preserves the September 20 contributor baseline and historical
+verification notes. It is not the current Git-status ledger or the complete
+list of newer journeys. For the present working-tree status, read
+[Codex Handoff](CODEX_HANDOFF.md) and inspect Git; for exact test evidence, read
+[Verification Status](VERIFICATION_STATUS.md). The current component/journey
+boundaries are in [Architecture v1.1](architecture/KLEEM_AI_ARCHITECTURE_V1_1.md)
+and [Next Journey Boundaries](NEXT_JOURNEY_BOUNDARIES.md). Since this baseline,
+the local repository has added read-only support paths, staffed chat handoff,
+delivery reporting/review closure, and narrow zero-total cancellation. These
+are not a public AWS deployment, a production identity system, a centralized
+Model Gateway, or completed LangSmith/Tau evaluation.
+
+Historical September 20 checkpoint: the authoritative refund observability batch is committed
 on `dev` as `082beee` and merged to `main` as `c75dd51`. The implemented local
 slice now includes dependency tracing, model/RAG signals, short Workflow Worker
 activity spans, Conversation Runtime and Human Operations request telemetry,
@@ -166,7 +178,7 @@ crosses the important system boundaries:
 - a real commerce integration through local Vendure;
 - deterministic policy and policy versions;
 - Temporal durable workflow;
-- Kafka events;
+- a future Kafka event backbone (not implemented locally);
 - customer confirmation;
 - human approval and handoff;
 - audit evidence, observability, and evaluation;
@@ -220,7 +232,8 @@ flowchart TD
     CONTROL["Control and Knowledge"] -->|"published knowledge release"| RAG
     AGENT -->|"read-only lookup_order"| MCP["Node Integration Gateway MCP server"]
     MCP --> VENDURE["Vendure commerce system"]
-    AGENT -->|"typed RefundProposal only"| WF["Temporal Workflow + Policy"]
+    AGENT -->|"typed RefundProposal only"| EDGE
+    EDGE -->|"authenticated workflow start"| WF["Temporal Workflow + Policy"]
     WF -->|"preview and exact confirmation"| CONV
     WF -->|"approval when required"| HUMAN["Human Operations"]
     WF -->|"narrow authorized activity"| GATEWAY["Integration Gateway"]

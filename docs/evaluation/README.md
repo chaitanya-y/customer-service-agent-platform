@@ -3,7 +3,7 @@
 This directory is the durable index for Customer Service Agent Platform evaluation.
 Start here, then use the linked reports for exact artifacts and limitations.
 
-## Current checkpoint — 2026-09-15
+## RAGAS checkpoint — 2026-09-15
 
 The bounded measurement baseline is frozen and the quality gate is **not green**.
 The authorized v4 large-refund trial completed execution but failed its blocking
@@ -19,6 +19,30 @@ answers were scored, ten were `SYSTEM_ERROR`, and zero cases passed all three
 repetitions. Human review/calibration is incomplete. LangSmith export and Tau
 benchmarking have not started. These results are evaluation evidence, not a
 production reliability claim.
+
+## Newer deterministic support regressions — 2026-10-02
+
+The RAGAS gate above has **not** been superseded by the newer read-only
+support evaluations. Those cases use synthetic, network-disabled service
+projections and blocking answer/tool-trajectory graders; they do not call a
+judge model or measure live retrieval quality. The reviewed reports cover
+[status clarity](READ_ONLY_STATUS_CLARITY_V5.md) (12/12 trials),
+[order total](READ_ONLY_ORDER_TOTAL_V6.md) (20/20),
+[catalog price](READ_ONLY_CATALOG_PRICE_V7.md) (20/20), and
+[recent order references](READ_ONLY_RECENT_ORDERS_V8.md) (24/24).
+The [return/exchange discussion fixture](RETURN_EXCHANGE_DISCUSSION_V4.md)
+also checks that unsupported exchange claims and commerce actions are blocked;
+it is a discussion, not a return or exchange workflow.
+
+These results support narrow deterministic behavior. They do not close the
+pending RAGAS quality gate, human calibration, LangSmith export, Tau benchmark,
+browser checks, or production reliability measurement.
+
+A [2026-10-02 one-case RAGAS diagnostic](RAGAS_LARGE_REFUND_2026_10_02.md)
+of the current large-refund answer had one guard rejection before scoring and
+one accepted answer that passed blocking checks. The accepted answer's
+non-blocking response-relevancy score was below target. This neither replaces
+the frozen baseline nor establishes repeated reliability.
 
 ## Evidence and guides
 

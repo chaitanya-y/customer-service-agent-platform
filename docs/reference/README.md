@@ -1,6 +1,6 @@
 # Reference Document Manifest
 
-Last updated: 2026-09-20
+Last updated: 2026-10-04
 
 ## Precedence
 
@@ -15,9 +15,9 @@ any deliberate architecture change.
 
 ## Architecture files
 
-- `architecture/Kleem_AI_Combined_HLD_and_LLD_Architecture.pdf` is the final
-  version 1.1 combined PDF regenerated on September 20. Its 10-page current
-  amendment records the implemented architecture and observability state, followed
+- `architecture/Kleem_AI_Combined_HLD_and_LLD_Architecture.pdf` is the
+  September 20 version 1.1 combined PDF snapshot. Its 10-page amendment records
+  the architecture and observability state at that date, followed
   by the complete original document as an immutable baseline appendix. Pages: 193.
   SHA-256:
   `62a9601ccc7648198e8e1d260226649103ec56e520b3a1f412012c72d84d78ce`.
@@ -25,7 +25,8 @@ any deliberate architecture change.
   immutable copy of the original 183-page architecture document. SHA-256:
   `dc336b4b3994736d4dc3f07bef0c649866ce5d98096f78f73c2ffb547fec1b71`.
 - `../architecture/KLEEM_AI_ARCHITECTURE_V1_1.md` is the searchable authoritative
-  source for current decisions.
+  source for current decisions, including local journeys added after the PDF
+  was generated. The PDF has not been regenerated for those changes.
 
 The September 20 amendment includes the current component boundaries, durable
 Human Operations persistence, planned Model Gateway status, implemented local

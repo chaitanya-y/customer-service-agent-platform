@@ -1,6 +1,6 @@
 # Architecture Decision Log
 
-Last updated: 2026-09-20
+Last updated: 2026-10-04
 
 This is a compact status index. Detailed rationale belongs in ADRs and the current
 architecture document.
@@ -9,8 +9,8 @@ architecture document.
 |---|---|---|
 | First vertical slice is governed refunds | Accepted and implemented | Finish and harden one complex journey before adding broad feature scope |
 | Polyglot runtime | Accepted and implemented | Python/FastAPI for Agent and RAG; Node.js/TypeScript for transactional and integration services |
-| Supervisor with bounded specialists | Accepted and partially implemented | LangGraph refund specialist path exists; broader specialist catalog remains future work |
-| MCP is the agent tool boundary | Accepted and implemented for lookup | Python Agent Runtime is an MCP client; Node Integration Gateway exposes read-only order lookup |
+| Supervisor with bounded specialists | Accepted and partially implemented | LangGraph refund orchestration and bounded read-only support paths exist; a broader specialist catalog remains future work |
+| MCP is the agent tool boundary | Accepted and implemented for read-only lookup | Python Agent Runtime is an MCP client; Node Integration Gateway exposes owner-checked order, catalog, and limited account lookups, never a refund-write tool |
 | Temporal owns long-running refund state | Accepted and implemented | Confirmation, approval, takeover, execution, provider processing, and reconciliation live in Workflow Workers |
 | Deterministic policy authorizes actions | Accepted and implemented | Model proposal is untrusted input; versioned policy and trusted facts decide the governed path |
 | Trusted policy explanations | Accepted; local implementation | Shared immutable policy catalog, agent-specific signed version/hash and application-rendered amount bands; purpose affects wording only, not approval. See the September 14 trusted-answer plan and verification status; no v9 live reliability claim |
@@ -20,6 +20,10 @@ architecture document.
 | Separate Python Evaluation Runner | Accepted and implemented offline | RAGAS adapters, versioned datasets, repeated trials, deterministic intake graders, usage reporting and baseline comparison; no calibrated release claim |
 | Evaluation before production observability | Completed sequencing decision | The v3 campaign and one v4 trial are frozen as an imperfect baseline. Local observability foundation work followed; human calibration, LangSmith, external Tau and full-workflow evaluation remain pending |
 | Next.js BFF browser boundaries | Accepted and implemented locally | Customer and Operations apps use same-origin server routes and HTTP-only local sessions |
+| Read-only support paths | Accepted and implemented locally | Owner-checked order, payment/refund, catalog, and limited account projections do not start the refund workflow; unavailable or ambiguous source facts fail closed |
+| Human chat handoff | Accepted and implemented locally | Conversation Runtime fences AI replies and owns the encrypted transcript; a separately authorized support role handles the queue without refund approval authority; browser and production gates remain |
+| Delivery issue review | Accepted and implemented locally | Human Operations records owner-scoped reports and assigned-staff administrative review closure; closure does not claim a remedy |
+| Zero-total cancellation | Accepted narrow local policy | A separate Temporal workflow requires exact confirmation and guarded provider-state reconciliation; paid-order cancellation remains disabled |
 | Local authentication adapters | Temporary and implemented | Customer/staff CLI tokens default to 30 days (2592000 seconds); internal assertions remain short lived. Replace local login with Cognito/OIDC in production |
 | Centralized Model Gateway | Accepted future design | Not implemented; Agent Runtime calls configured models directly today |
 | Kafka/MSK event backbone | Accepted future design | Not implemented; transactional outboxes and direct local delivery create the migration point |
