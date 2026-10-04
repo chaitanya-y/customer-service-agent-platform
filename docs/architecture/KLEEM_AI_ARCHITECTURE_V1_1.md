@@ -2,7 +2,7 @@
 
 Version: 1.1 current architecture edition
 Date: 2026-09-20
-Implementation and verification status updated: 2026-09-20
+Implementation and verification status updated: 2026-10-04
 Status: Authoritative for the implemented repository and accepted near-term plan
 
 ## Document authority
@@ -16,10 +16,11 @@ this document and the ADR take precedence. The old PDF remains valuable for
 product intent, non-functional requirements, domain decomposition, and detailed
 future-state analysis.
 
-The final combined PDF was regenerated on September 20 from this amendment and
-the complete version 1.0 baseline appendix. Later operational evidence belongs in
-`docs/VERIFICATION_STATUS.md`; architecture changes belong here before another
-PDF is published.
+The combined PDF was regenerated on September 20 from that day's amendment and
+the complete version 1.0 baseline appendix. This Markdown has since been updated
+for additional local journeys and is newer than the PDF. Later operational
+evidence belongs in `docs/VERIFICATION_STATUS.md`; architecture changes belong
+here before another PDF is published.
 
 ## Executive summary
 
@@ -45,7 +46,7 @@ boundaries and safety controls without claiming production scale or reliability.
 | Human Operations persistence | Earlier local slice was in memory | Running Human Operations service uses PostgreSQL with RLS, transactions, audit, idempotency, and durable decision outbox |
 | Model access | Central routing appears in future-state architecture | Central Model Gateway remains planned; Agent Runtime calls configured models directly today |
 | Observability | OpenTelemetry and CloudWatch appear as future-state capabilities | Opt-in local OpenTelemetry now covers Edge, Agent Runtime, Knowledge/RAG phases, Gateway, Conversation Runtime, Human Operations and short Workflow Worker activity spans. PostgreSQL-derived refund/outbox gauges, service heartbeats, Collector health, Grafana dashboards and eleven non-notifying local alerts are implemented; production SLOs, notification routing, CloudWatch/AWS export and production validation remain planned |
-| Delivery sequence | Broad platform build-out | Complete and harden the refund walking skeleton before expanding journeys |
+| Journey sequence | Broad platform build-out | The refund walking skeleton is locally complete through dummy-provider settlement. Separate local paths now cover read-only support, staffed chat handoff, delivery report/review closure, and zero-total no-payment cancellation. Paid-order cancellation, physical returns/exchanges, replacement, and wider account mutations are not complete; browser and production gates differ by journey |
 
 ## Architecture principles
 
@@ -116,22 +117,97 @@ Workflow Workers / Human Operations / Integration Gateway
 Trace context correlates work; it never grants access. Signed assertions,
 workflow capabilities and durable audit records remain the authority.
 
+The diagram above follows the refund path. Other local paths deliberately
+branch earlier: read-only support ends after owner-checked Gateway or
+customer-safe Knowledge/RAG reads; delivery reporting goes from Edge to Human
+Operations PostgreSQL without Temporal or a commerce mutation; staffed chat
+changes Conversation Runtime control and keeps its encrypted transcript;
+zero-total cancellation uses its own Temporal workflow, exact preview, Gateway
+ledger, and guarded Vendure plugin. These are not alternate entries into the
+refund workflow.
+
 ## Release and ownership boundaries
 
 | Boundary | Technology | Responsibility |
 |---|---|---|
-| Customer Portal | Next.js, React, TypeScript | Customer conversation, preview, confirmation, and truthful lifecycle status |
-| Operations Console | Next.js, React, TypeScript | Queue, claim, review, exceptional plan, rejection, and audit display |
+| Customer Portal | Next.js, React, TypeScript | Customer conversation, explicit human chat handoff, read-only support and saved-address status, refund preview/confirmation/status, and delivery issue report/status |
+| Operations Console | Next.js, React, TypeScript | Refund queue/review, separately authorized delivery report claim/acknowledgment/review closure, and support-chat queue/reply |
 | Admin Console | Next.js, React, TypeScript | Current shell; future release/configuration management |
 | Edge API | Node.js, TypeScript, Fastify | Customer authentication, trusted context, validation, orchestration entry, and customer-owned workflow reads |
-| Conversation Runtime | Node.js, TypeScript, Fastify, PostgreSQL | Conversations, encrypted messages, ordering, workflow links, projections, and event delivery |
+| Conversation Runtime | Node.js, TypeScript, Fastify, PostgreSQL | Conversations, encrypted customer/assistant/staff messages, control-versioned AI/human ownership, workflow links and encrypted start reservations, projections, and event delivery |
 | Agent Runtime | Python, FastAPI, LangGraph | Intent, specialist orchestration, context construction, RAG use, model calls, guardrails, and typed proposals |
 | Knowledge/RAG | Python, FastAPI, OpenSearch | Ingestion, parsing, chunking, embeddings, publication, hybrid retrieval, reranking, citations, and evaluation |
-| Workflow Workers | Node.js, TypeScript, Temporal | Deterministic policy, preview, confirmation, approval, takeover, execution, retries, and reconciliation |
-| Integration Gateway | Node.js, TypeScript, Fastify, PostgreSQL | Vendure adapter, MCP server, authorization, idempotency, refund write, provider events, and audit evidence |
-| Human Operations | Node.js, TypeScript, Fastify, PostgreSQL | Durable cases, staff authorization, claim/reassign, decisions, audit, and Temporal outbox delivery |
+| Workflow Workers | Node.js, TypeScript, Temporal | Deterministic refund policy and a separate narrow cancellation workflow, exact previews, confirmation, approval, execution, retries, and reconciliation |
+| Integration Gateway | Node.js, TypeScript, Fastify, PostgreSQL | Vendure adapter, customer-scoped read-only order/product tools, aggregate payment/refund and saved-address status, authorization, idempotent refund and guarded zero-total cancellation operations, provider events, and audit evidence |
+| Human Operations | Node.js, TypeScript, Fastify, PostgreSQL | Durable refund cases, separate delivery reports with assigned-staff review closure, staff authorization, signed support-chat mediation to Conversation Runtime, audit, and refund decision outbox delivery |
 | Evaluation Runner, within Control and Knowledge | Python, RAGAS adapters | Versioned datasets, deterministic and semantic graders, repeated trials, usage reports, and compatible baseline comparison; separate from online runtime |
 | Local Observability | OpenTelemetry, Grafana LGTM | Opt-in traces, bounded metrics and safe correlated logs across the implemented service slice, plus authoritative refund/outbox gauges, service heartbeats, Collector health, dashboards and eleven local non-notifying alerts; development evidence only |
+
+## Additional local support paths
+
+The existing customer chat now routes customer-safe product/policy questions,
+owned order status, owned order-item lists, and aggregate payment/refund status
+through bounded read-only tools.
+Deterministic read-only paths also cover the current tax-inclusive order total,
+one exact catalog variant's current price, indexed named-variant availability,
+and up to ten recent owner-checked order references. These are distinct facts:
+catalog price is not checkout total, order total is not amount paid, and recent
+references are not a complete order history. The current OrderItems v1 tool
+fails closed on cancelled orders because it cannot safely label historical
+quantity as current contents.
+These paths do not start a refund workflow. The delivery issue form is separate
+from the chat: Edge checks the customer's open conversation and order ownership,
+then writes a body-bound, idempotent report to Human Operations PostgreSQL.
+Delivery staff use a separate audience-scoped token and queue to claim and
+acknowledge a report. Only the assigned staff member can later close its review
+with the current version and a stable retry key. Customer readback exposes only
+six safe fields and fixed copy that does not claim a remedy. No model, Temporal
+workflow, or commerce mutation is part of that delivery path. Migration 006
+has been applied locally; one disposable report passed authenticated backend
+closure, replay/conflict, customer readback, and audit checks. The browser UI
+has not been exercised by the agent.
+
+Three exact generic exchange questions use a targeted retrieval query to find
+the published change-of-mind return section. The answer requires the exact
+`CUSTOMER_SAFE` sentence and citation, labels it as a conditional return rule,
+and explicitly leaves exchange approval unverified. This is read-only policy
+discussion, not a return or exchange request. One local Edge conversation
+tested all three questions without a refund or cancellation link; the separate
+synthetic v4 evaluation repeated six cases twice.
+
+The explicit saved-address check on `/support` bypasses Agent Runtime and RAG.
+Edge signs a self-scoped customer context for Gateway; Gateway reads only
+address counts/default flags from the configured Vendure channel. No private
+address fields reach the customer projection or a model. This check does not
+change addresses or verify an existing order's delivery destination.
+
+Customer-to-person chat handoff is a separate control path. Conversation Runtime
+atomically changes an AI-owned conversation to a queued handoff session and
+fences stale assistant commits by control version. Human Operations verifies a
+distinct `SUPPORT_AGENT` login and signs exact staff actions for Conversation
+Runtime; it does not own or duplicate the transcript. Staff claim, reply,
+return-to-AI, and close operate on that encrypted transcript without granting
+refund approval. An assistant message that already accepted a ready refund
+proposal reserves the exact encrypted Temporal start input in the same database
+transaction. A same-client-message retry can recover it for up to one hour,
+shorter than the running local Temporal namespace's 24-hour retention;
+older/legacy pending starts require manual reconciliation. The committed
+handoff flag defaults off, while the ignored local environment is enabled
+after API-level verification. Browser and production checks remain pending.
+
+The delivery path is a report-and-review-closure slice, not a replacement,
+return, cancellation, refund, or verified resolution. Its local evidence,
+security boundaries, and release gates are recorded in
+[Delivery issue report journey](../DELIVERY_ISSUE_REPORT_JOURNEY.md).
+
+The first cancellation policy is a separate no-payment, zero-total path for a
+placed, unfulfilled, customer-owned order. Chat acknowledges intent but does
+not cancel anything. An exact customer preview and confirmation precede the
+guarded Vendure write; the customer sees success only after provider state and
+the operation marker agree. Two disposable local orders reached `Cancelled`,
+including one uncertain-outcome recovery. A paid-order variant has contracts
+under development but remains disabled after a demonstrated simulator
+transaction/concurrency risk. See [the cancellation boundary](../ZERO_TOTAL_CANCELLATION_JOURNEY.md).
 
 ## Governed refund sequence
 
@@ -274,15 +350,17 @@ Kafka-backed event/projection path.
 
 ## Security and identity boundaries
 
-The local development system has two manually generated login JWTs:
+The local development system has four separate manually generated login JWT roles:
 
 - customer login token, verified by Edge API;
-- Human Operations staff token, verified by Human Operations.
+- refund supervisor staff token, verified by Human Operations;
+- delivery staff token, verified by Human Operations;
+- support agent token, verified by Human Operations for chat handoff only.
 
 All service assertions are generated automatically and are short lived. Audiences
 separate Agent Runtime, Knowledge/RAG, Integration Gateway, Conversation Runtime,
 Workflow Workers, and Human Operations purposes. Separate secrets protect customer
-login, staff login, Edge service writes, workflow capabilities, human case calls,
+login, role-specific staff login, Edge service writes, workflow capabilities, human case calls,
 and provider events.
 
 Production replaces local login tokens with Cognito/OIDC, stores secrets in AWS
@@ -387,6 +465,11 @@ The first deployment target is a single AWS region:
 
 EKS, Helm, Argo CD, multi-region active-active, and very large scale are future
 options, not claims about the current repository.
+Local isolated container packaging proofs now exist for the application
+services and web surfaces, but they are not multi-service startup, cloud
+infrastructure, or production readiness. Identity, CI/CD, cloud search access,
+durable Temporal, private evidence storage, backups, and CloudWatch export
+remain gates in [AWS deployment readiness](../AWS_DEPLOYMENT_READINESS.md).
 
 ## Current verification and remaining work
 
@@ -401,6 +484,10 @@ Implemented and substantially exercised locally:
 - authorized idempotent Vendure refund path;
 - signed provider outcome, processing, and reconciliation;
 - customer and operations browser projections.
+- separate owner-checked read-only support answers, staffed chat handoff,
+  delivery issue reporting with administrative review closure, and a narrow
+  zero-total no-payment cancellation path, with journey-specific local
+  verification limits;
 - opt-in local OpenTelemetry correlation across Edge, Agent Runtime,
   Knowledge/RAG, Conversation Runtime, Human Operations, Gateway and short
   Workflow Worker activities, with PostgreSQL-derived refund/outbox gauges,
@@ -429,6 +516,7 @@ Still pending:
 - deterministic delivery-age eligibility and production photo storage, scanning,
   retention approval and recovery operations;
 - centralized Model Gateway;
+- paid-order cancellation and physical return/exchange execution;
 - Kafka/MSK event delivery;
 - browser BFF telemetry, model pricing/cost attribution and workflow-level
   Temporal business metrics;

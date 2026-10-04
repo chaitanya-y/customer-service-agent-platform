@@ -116,13 +116,15 @@ them with `feat:` and do not use a hyphen as a separator.
 ## Local security model
 
 The local system uses multiple independent signing secrets because each protects a
-different trust relationship. Only two login tokens are manually generated:
-customer and Human Operations staff. Internal assertions are short lived and
+different trust relationship. Each enabled local role has its own manually
+generated login token: customer, refund staff, delivery staff, or chat support
+staff. Internal assertions are short lived and
 generated automatically. Read `docs/LOCAL_AUTH_AND_SECRETS.md` before diagnosing
 authentication or changing an environment variable.
 
-Local customer and staff CLI login tokens now default to 30 days (2592000
-seconds), not 48 hours. Do not extend the automatic internal assertions or infer
+Local customer, refund staff, delivery staff, and chat support staff CLI login
+tokens now default to 30 days (2592000 seconds), not 48 hours. Do not extend
+the automatic internal assertions or infer
 the same lifetime for production authentication. Renew local tokens only with
 owner authorization; keep their values out of logs and Git.
 

@@ -89,6 +89,17 @@ Generate a new one after it expires. The web applications keep the tokens
 server-side and forward them to their backend services. Local sign-in sets an
 HTTP-only session cookie; it does not put the JWT into browser JavaScript.
 
+Integration Gateway also requires `VENDURE_CHANNEL_TOKEN` and
+`VENDURE_CHANNEL_CODE` in its ignored `.env`, in addition to
+`VENDURE_API_KEY`. The token selects the intended Vendure channel and the
+code is the expected `activeChannel.code`; these must describe the same
+channel for the Gateway's configured tenant. The Gateway now refuses to
+start without both values, rather than silently using Vendure's default
+channel. Treat the channel token as sensitive. A read-only Admin channel
+check can verify that the token resolves to the expected code before testing
+a refund; do not print the token or API key. This is a single-channel local
+binding, not dynamic multi-tenant routing.
+
 The staff CLI defaults to 30 days. Set `LOCAL_HUMAN_ACCESS_TTL_SECONDS=2592000`
 in Human Operations `.env` so an older shorter override does not take precedence.
 Check the effective local file:
@@ -138,6 +149,16 @@ DATABASE_URL=postgresql://cso_local:cso_local@127.0.0.1:5432/customer_service_os
 cd ../human-operations
 MIGRATION_DATABASE_URL=postgresql://cso_local:cso_local@127.0.0.1:5432/customer_service_os pnpm migrate
 ```
+
+For Gateway migration `008_refund_order_claims.sql`, stop old Gateway and
+Temporal Worker refund writers before migrating, then start only the updated
+versions. Mixed old/new writers can bypass the application-only order fence.
+The migration preserves existing refunds and backfills a blocking claim for
+each historical order. It intentionally prevents a new Gateway refund attempt
+on an order with any earlier execution, including a failed one; old executions
+without a persisted selection/reason digest cannot be retried through the
+execution endpoint. This does not replace provider idempotency or guard direct
+Vendure Admin refunds. See [refund execution safety](REFUND_EXECUTION_SAFETY_2026-10-02.md).
 
 ### 2. Temporal
 
@@ -262,6 +283,35 @@ has been more reliable than the current Turbopack setup on this local stack.
 | Temporal UI | `http://127.0.0.1:8233` |
 | Local Grafana | `http://127.0.0.1:3300/d/cso-foundation` |
 | OTLP HTTP receiver | `http://127.0.0.1:4318` |
+
+## Read-only local readiness check
+
+Before a local browser run, optionally check the documented refund-stack endpoints:
+
+```bash
+node tools/local/stack-readiness.mjs
+```
+
+The check sends unauthenticated `GET` requests to local HTTP endpoints and opens
+read-only TCP connections to PostgreSQL and Temporal gRPC. It does not start or
+stop services, inspect databases, or change configuration. `healthy` means the
+endpoint answered successfully, `down` means it refused a connection or returned
+a server error, and `unknown` means the result was inconclusive (for example, a
+timeout or non-success response). Any endpoint not reported healthy gives the
+command a non-zero exit code; token metadata does not affect that exit code.
+
+It also looks for the customer login token and each documented staff login token
+(refund, delivery, and chat support) in their effective web environments:
+`CSO_LOCAL_CUSTOMER_TOKEN` comes from the Customer Portal environment, while
+`CSO_LOCAL_HUMAN_TOKEN`, `CSO_LOCAL_DELIVERY_STAFF_TOKEN`, and
+`CSO_LOCAL_SUPPORT_STAFF_TOKEN` come from the Operations Console environment.
+For each app, `.env.local` takes precedence over `.env`, with the process
+environment taking precedence over both. The report prints only expiry metadata.
+It does not validate JWT signatures or authorization, so every parsed expiry is
+labeled `unverified`; an unrecognized token shape is reported as unverified with
+no guessed expiry. Token values, claims such as customer or staff IDs, and
+secrets are never printed. Missing tokens are reported as `missing`. This check
+does not renew tokens or prove that a service will accept them.
 
 Use the exact `127.0.0.1` URLs above for browser testing. Local BFF routes accept
 that development origin explicitly. Do not mix it with `localhost` in the same

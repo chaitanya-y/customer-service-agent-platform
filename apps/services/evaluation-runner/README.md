@@ -15,7 +15,36 @@ for implementation and verification status. A separately approved single v4
 trial completed on September 15 but failed its blocking policy-answer check:
 the answer stayed generic and retained a RAG citation instead of the required
 USD 750/500 application explanation. See [the measured checkpoint](../../../docs/evaluation/RAGAS_CLOSURE_REVIEW.md)
-for scores, usage and review limits. No retry was performed.
+for scores, usage and review limits. No retry was performed in that campaign.
+On October 2, a separate single-case prompt-v10 regression trial passed the
+blocking check and returned the exact reviewed explanation without a RAG
+citation. Its RAGAS response-relevancy grade, 0.58647, missed the provisional
+informational 0.7 target. This is one targeted repetition, not a calibrated
+full-dataset baseline; the same measured checkpoint records its usage and limits.
+The separate damaged-item v10 trial passed blocking checks but missed three
+informational semantic minima; the incorrect-item v10 attempt produced no
+quality result because a RAGAS judge exhausted its output-token budget. Two
+independent detector reviews then led to current composer behavior v12. Do not
+attribute the v10 scores to v12 or
+retry the failed judge automatically.
+The evaluator now accepts `--judge-max-tokens` from 1,024 through 8,192,
+defaulting to the historical 4,096. The selected value is recorded in each
+completed sample's version evidence. Raising it may let a reasoning judge
+finish structured output but can also increase tokens and cost; it is not a
+guaranteed fix, and a failed judge remains a system failure with no quality
+score. The offline Evaluation Runner suite passed 300/300 after this change.
+A distinct v12 incorrect-item trial with 8,192 completed, but its answer was
+verbose and missed provisional response-relevancy and factual-correctness
+targets. See the measured checkpoint; do not call it a full v4 baseline.
+The v12 provider-timing case gave a concise conditional answer but missed the
+informational relevancy target. The final-sale v12 case was rejected by the
+answer guard before semantic grading; a separate bounded diagnostic identified
+an omitted prerequisite in the model's policy summary. A prompt-v13 trial
+passed the configured blocking checks but human review found a personalized
+denial unsupported by verified item status. A later deterministic guard change
+rejects that wording; it has not received a post-change paid trial. The bounded
+paid campaign is stopped: all five seed cases were visited, but versions and
+outcomes are mixed, so there is no calibrated full-v4 baseline.
 
 The measured historical seed is
 `fixtures/evaluation-datasets/refund-rag-answer-v3.json`. It retains the v2
@@ -41,7 +70,7 @@ the v6/v2 damaged-item trial has measured scores. Preserve every failure, report
 the number of scored trials separately, and never average missing scores as
 zero or report only the successful subset as overall reliability. A completed
 trial's pass flag reflects blocking checks, not all semantic minima. Human
-review is still needed. The later local answer implementation uses v9 and the
+review is still needed. The current local answer implementation uses v13 and the
 trusted policy/purpose boundary described below. LangSmith and Tau work remain
 separate from this completed baseline campaign; do not restart prompt-only retry
 cycles. Notify the owner before beginning LangSmith and obtain export approval.
@@ -56,6 +85,10 @@ has no authority to quote monetary-policy thresholds.
 
 The executor passes the verified projection to the production answer composer.
 Result versions record `refund_policy` and `refund_policy_catalog_sha256`;
+new refund answer samples also record `answer_presentation` separately from
+`answer_prompt`, so a deterministic presentation change cannot silently share
+the same version evidence as an unchanged model prompt. Historical samples
+without this field must not be treated as a same-implementation comparison.
 `application_facts` include the independently resolved public limits. Neither
 dataset reference answers nor model-written text supplies those facts. The model
 does not receive this projection or the trusted proposed amount as prompt fields.
@@ -455,6 +488,7 @@ ALLOW_PAID_API_CALLS=true RAGAS_DO_NOT_TRACK=true LANGSMITH_TRACING=false LANGCH
   --answer-model "APPROVED_ANSWER_MODEL" \
   --judge-model "APPROVED_JUDGE_MODEL" \
   --judge-embedding-model "text-embedding-3-small" \
+  --judge-max-tokens 4096 \
   --run-id "UNIQUE_APPROVED_V3_RUN_ID" \
   --evaluation-version "refund-ragas-v2"
 ```
@@ -476,6 +510,144 @@ explicit retention approval. A system rejection records an unscored failed trial
 and subsequent trials continue; fatal evaluator failures invalidate the run.
 Check the result artifact even when the CLI exits nonzero. Do not rerun a failed
 campaign automatically.
+
+## Offline read-only support evaluation
+
+`fixtures/evaluation-datasets/read-only-support-v1.json` contains twenty-six
+synthetic order-status/tracking, owned-order-items, payment-status, and
+product/policy cases. It covers missing references, verified tracking without
+an invented ETA, missing versus non-owned orders, dependency failure, exact
+product pricing, a full variant name, an unrelated catalog hit, an unsupported
+product question, grounded return-window, return-shipping-payer,
+damaged-item-photo facts, numeric
+return-shipping-cost abstention, and irrelevant policy evidence. The
+owned-order-items cases verify names and quantities, identical missing/non-owner
+wording, and fail-closed handling of private payment, customer ID, price, and SKU
+fields. The payment-status cases check payment-only and refund-only wording,
+missing-reference clarification, identical missing/non-owner masking, and strict
+rejection of unknown states or private payment fields. The adapter runs the
+production read-only specialist functions against deterministic in-process fakes.
+Two repetitions per case verify stable outcomes without calling Vendure, OpenAI,
+OpenSearch, or a payment provider.
+
+The blocking grades check route status, required and forbidden tool calls, and
+reviewed answer fragments. The answer grader is a narrow deterministic guard,
+not a semantic judge or proof of general answer quality. The non-owner case
+injects the same not-found outcome as the missing-order case; Gateway contract
+tests, not this adapter, verify the ownership check itself. This suite does not
+exercise the classifier, Edge authentication, browser UI, or refund workflow.
+Its zero latency and cost fields mean "not measured" in this offline fixture,
+not a production performance result.
+
+Run the focused cases with:
+
+```bash
+uv run --extra live-ragas pytest tests/test_read_only_support_evaluation.py
+```
+
+### Version 3 named-variant availability snapshot
+
+`fixtures/evaluation-datasets/read-only-support-v3.json` adds eight independently
+versioned synthetic cases; the v1 and v2 fixtures are unchanged. It covers an
+in-stock variant, an out-of-stock variant, product-only clarification, missing
+variant stock status, duplicate-name ambiguity, and legacy product-level stock
+being ignored when missing, contradictory, or irrelevant to a price answer.
+Answers describe catalog-index status, not live stock, reservation, or delivery.
+
+The production `ReadOnlySupportEvaluatedSystem` runs each case twice, with the
+existing blocking `ReadOnlyAnswerGrader` and `ReadOnlyTrajectoryGrader`: sixteen
+reviewed trials. Every case permits exactly one named catalog lookup, with
+reviewed arguments; no evidence/model/refund/mutation call is permitted. Tests
+deny network connections and prove that an injected stock claim in the
+missing-fact case fails both repetitions. Separate mutation checks reject a
+refund tool, extra lookup argument, refund proposal, and model call.
+
+```bash
+uv run --extra live-ragas pytest tests/test_read_only_availability_v3.py
+```
+
+This is an offline specialist regression, not a live Vendure stock read or proof
+of stock-index freshness, routing/classification, authentication, or browser UX.
+Reported zero cost/latency is synthetic and must not be used as a performance
+measurement.
+
+### Version 5 status-clarity regression
+
+`fixtures/evaluation-datasets/read-only-support-v5.json` adds six independent
+synthetic cases for refund-attempt uncertainty and multi-fulfillment tracking
+code pairing. Its 12 repeated trials passed on 2026-10-02. It executes the
+real deterministic specialists against fakes and grades exact read-only tool
+traces. It does not
+exercise the intake classifier, customer ownership, provider attempt IDs, or
+carrier tracking. See the [v5 note](../../../docs/evaluation/READ_ONLY_STATUS_CLARITY_V5.md).
+
+The versioned v2 fixture is deliberately preserved. One `failed-refund` case
+there expects old “failed” wording, while the current Gateway aggregate also
+represents cancelled attempts and the specialist correctly says “did not
+complete.” Another `policy-empty-evidence` case expects the older raw search
+query; the targeted generic-return query changes its trace but not its safe
+source-unavailable answer. Its test requires precisely these four historical
+trial drifts (two repetitions per case); do not report all v2 trials as
+passing or rewrite the fixture to hide the changes.
+
+```bash
+uv run --no-sync pytest -q tests/test_read_only_status_clarity_v5.py
+```
+
+### Version 6 read-only order-total regression
+
+`fixtures/evaluation-datasets/read-only-order-total-v6.json` adds ten
+independently versioned synthetic cases for USD, INR and zero-decimal JPY
+formatting; missing or mismatched orders; unsupported currency; extra source
+fields; and mixed invoice, payment and refund questions. Two repetitions per
+case passed (20/20) on 2026-10-02. The current full offline Evaluation Runner
+suite passed 316 tests. The blocking graders check answer boundaries and
+exact tool names/arguments. Mixed-intent cases run the deterministic
+classifier; positive order-total cases invoke the specialist directly, with
+a separate no-model test confirming their seven questions route to it. A
+mutation test verifies that a fabricated payment claim and extra refund tool
+call fail the respective blocking graders.
+
+This is an offline, network-denied specialist/classifier regression, not a
+live customer-ownership test, browser test, model evaluation, or proof of
+Vendure data freshness. Its zero model cost and latency are not production
+measurements. One separate owner-scoped local Edge chat is recorded in the
+[journey note](../../../docs/ORDER_TOTAL_JOURNEY.md), and the dataset and
+grading limits are detailed in the [v6 evaluation note](../../../docs/evaluation/READ_ONLY_ORDER_TOTAL_V6.md).
+
+```bash
+uv run --no-sync pytest -q tests/test_read_only_order_total_v6.py
+```
+
+### Version 7 read-only catalog-price regression
+
+`fixtures/evaluation-datasets/read-only-catalog-price-v7.json` has ten
+synthetic cases: exact variant prices in USD/INR/JPY, single-variant product
+questions, multi-variant ambiguity, missing and duplicate variants, missing
+price, unsupported currency, and mixed refund/payment intent. Two repetitions
+per case passed (20/20) on 2026-10-02; the full offline Evaluation Runner suite
+passed 319 tests. Blocking checks require a source-bounded listed price and
+the read-only catalog lookup, and reject injected checkout totals and refund
+tool calls. This is an offline regression, not a browser test or proof that a
+live Vendure catalog price is fresh. See the [v7 evaluation note](../../../docs/evaluation/READ_ONLY_CATALOG_PRICE_V7.md).
+
+```bash
+uv run --no-sync pytest -q tests/test_read_only_catalog_price_v7.py
+```
+
+### Version 8 read-only recent-order regression
+
+`fixtures/evaluation-datasets/read-only-recent-orders-v8.json` contains eight
+synthetic cases for a bounded owner-scoped reference list, empty and partial
+pages, malformed/outage results, and mixed-intent clarification. Two
+repetitions per case passed (16/16); the full offline Evaluation Runner suite
+passed 322 tests. Blocking answer and exact-trajectory graders reject an
+injected delivery claim or refund tool call. This is not a live ownership or
+browser verification; see the [v8 note](../../../docs/evaluation/READ_ONLY_RECENT_ORDERS_V8.md).
+
+```bash
+uv run --no-sync pytest -q tests/test_read_only_recent_orders_v8.py
+```
 
 ## Deterministic refund-agent trajectory evaluation
 
