@@ -78,6 +78,15 @@ test('unavailable previews have no current or upcoming refund steps', () => {
   assert.deepEqual(journey.timeline.map(step => step.status), ['COMPLETED', 'SKIPPED']);
 });
 
+test('failed refund execution directs the customer to support instead of saying no action is needed', () => {
+  const journey = toRefundJourneyView('refund-failed', { stage: 'REFUND_FAILED' });
+  assert.equal(journey.stage, 'REFUND_FAILED');
+  assert.deepEqual(journey.next_action, {
+    type: 'CONTACT_SUPPORT',
+    label: 'Contact support to review this refund request',
+  });
+});
+
 test('takeover without a preview does not claim preview preparation completed', () => {
   const journey = toRefundJourneyView('refund-001', { stage: 'HUMAN_TAKEOVER_REQUIRED' });
   assert.equal(journey.timeline.find(step => step.id === 'PREVIEW_READY')?.status, 'PENDING');

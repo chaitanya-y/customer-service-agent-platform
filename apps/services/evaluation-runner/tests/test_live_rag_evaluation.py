@@ -821,7 +821,7 @@ def test_live_judge_sends_explicit_completion_budget_through_ragas(
 
     monkeypatch.setattr(openai, "AsyncOpenAI", OfflineOpenAI)
     config = make_config(tmp_path, allow_paid_api_calls=True).model_copy(
-        update={"judge_model": "gpt-5-nano"}
+        update={"judge_model": "gpt-5-nano", "judge_max_tokens": 8192}
     )
     config.knowledge_env_path.write_text(
         "OPENAI_API_KEY=test-only-placeholder\n"
@@ -852,7 +852,7 @@ def test_live_judge_sends_explicit_completion_budget_through_ragas(
     assert asyncio.run(evaluate()) == pytest.approx(1.0)
     assert len(requests) == 1
     assert requests[0]["model"] == "gpt-5-nano"
-    assert requests[0]["max_completion_tokens"] == 4096
+    assert requests[0]["max_completion_tokens"] == 8192
     assert "max_tokens" not in requests[0]
     report = usage_recorder.build_report(
         run_id=config.run_id,
@@ -1412,6 +1412,54 @@ def test_parse_args_omitted_case_id_means_full_dataset(tmp_path: Path) -> None:
         ]
     )
     assert args.case_id is None
+
+
+def test_judge_budget_is_bounded_and_recorded(tmp_path: Path) -> None:
+    config = make_config(tmp_path, allow_paid_api_calls=True)
+    with pytest.raises(ValueError):
+        LiveRagEvaluationConfig.model_validate(
+            {**config.model_dump(), "judge_max_tokens": 8193}
+        )
+
+    selected = LiveRagEvaluationConfig.model_validate(
+        {**config.model_dump(), "judge_max_tokens": 8192}
+    )
+    asyncio.run(
+        run_live_rag_evaluation(
+            selected,
+            system_factory=RecordingFactory(FakeAnswerSystem()),
+            scorer_factory=RecordingFactory(FakeRagasScorer()),
+        )
+    )
+    persisted = EvaluationRun.model_validate_json(selected.output_path.read_text())
+    assert persisted.trials[0].sample is not None
+    assert persisted.trials[0].sample.versions["judge_max_tokens"] == "8192"
+
+
+def test_parse_args_accepts_judge_budget(tmp_path: Path) -> None:
+    args = live_module.parse_args(
+        [
+            "--dataset-path",
+            str(tmp_path / "dataset.json"),
+            "--output-path",
+            str(tmp_path / "result.json"),
+            "--knowledge-env-path",
+            str(tmp_path / "knowledge.env"),
+            "--answer-model",
+            "answer",
+            "--judge-model",
+            "judge",
+            "--judge-embedding-model",
+            "embedding",
+            "--run-id",
+            "run",
+            "--evaluation-version",
+            "version",
+            "--judge-max-tokens",
+            "8192",
+        ]
+    )
+    assert args.judge_max_tokens == 8192
 
 
 def test_parse_args_accepts_explicit_rejection_diagnostics_path(

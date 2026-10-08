@@ -20,7 +20,8 @@ const refundContextRequestSchema = z.object({
     }),
     z.object({
       scope: z.literal('SELECTED_ITEMS'),
-      itemIds: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+      itemIds: z.array(z.string().trim().min(1).max(100)).min(1).max(100)
+        .refine((itemIds) => new Set(itemIds).size === itemIds.length),
     }),
   ]),
 });

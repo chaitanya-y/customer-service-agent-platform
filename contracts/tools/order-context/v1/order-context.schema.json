@@ -174,6 +174,12 @@
         },
         "quantity": {
           "type": "integer",
+          "description": "Current remaining commerce quantity; zero for a fully cancelled line.",
+          "minimum": 0
+        },
+        "orderedQuantity": {
+          "type": "integer",
+          "description": "Historical quantity at order placement, when available. For item-history display only; never a refundable quantity.",
           "minimum": 1
         },
         "unitPrice": {

@@ -17,6 +17,8 @@ function reserveInput(idempotencyKey: string, occurredAt = INITIAL_TIME) {
     orderId: `order-${idempotencyKey}`,
     amountMinor: 5_000,
     currency: 'USD',
+    selection: { scope: 'FULL_ORDER' as const, itemIds: [] },
+    reasonCode: 'DAMAGED',
     occurredAt,
   };
 }

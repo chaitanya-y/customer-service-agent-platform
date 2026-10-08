@@ -1,41 +1,27 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 
 import type { CommerceProvider } from './commerce.js';
 import { toRefundContext } from './refund-context.js';
 import type { RefundExecutionRepository } from './refund-execution-repository.js';
-import { WORKFLOW_ACCESS_ASSERTION_HEADER, type VerifyWorkflowAccessAssertion } from './workflow-access.js';
-
-const requestSchema = z.object({
-  orderId: z.string().trim().min(1).max(160),
-  reasonCode: z.string().trim().min(1).max(100),
-  amount: z.object({ amountMinor: z.number().int().positive(), currency: z.literal('USD') }).strict(),
-  selection: z.object({ scope: z.enum(['FULL_ORDER', 'SELECTED_ITEMS']), itemIds: z.array(z.string()).max(100) }).strict(),
-  idempotencyKey: z.string().min(1).max(240),
-  previewId: z.string().trim().min(1).max(160),
-}).strict();
+import { refundExecutionIntentSchema, WORKFLOW_ACCESS_ASSERTION_HEADER, type RefundExecutionIntent, type VerifyWorkflowAccessAssertion } from './workflow-access.js';
 
 type ExecutionResult = { status: 'SUBMITTED' | 'SUCCEEDED' | 'FAILED' | 'PENDING_RECONCILIATION'; providerRefundId?: string };
 
 export function registerRefundExecutionRoutes(app: FastifyInstance, commerceProvider: CommerceProvider, repository: RefundExecutionRepository, verify?: VerifyWorkflowAccessAssertion): void {
   app.post('/internal/v1/refunds', async (request, reply) => {
-    const parsed = requestSchema.safeParse(request.body);
+    const parsed = refundExecutionIntentSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: { code: 'invalid_refund_execution_request' } });
     let access;
     try {
       access = await verify?.(typeof request.headers[WORKFLOW_ACCESS_ASSERTION_HEADER] === 'string' ? request.headers[WORKFLOW_ACCESS_ASSERTION_HEADER] : undefined);
       if (!verify) throw new Error('missing verifier');
     } catch { return reply.code(401).send({ error: { code: 'workflow_unauthorized' } }); }
-    if (!access) return reply.code(401).send({ error: { code: 'workflow_unauthorized' } });
+    if (!access?.refundExecution || !sameExecutionIntent(access.refundExecution, parsed.data)) return reply.code(401).send({ error: { code: 'workflow_unauthorized' } });
     if (!commerceProvider.executeRefund) return reply.code(501).send({ error: { code: 'refund_execution_not_configured' } });
     const order = await commerceProvider.getOrderById(parsed.data.orderId);
-    if (!order || order.customer?.id !== access?.subjectCustomerId) return reply.code(404).send({ error: { code: 'order_not_found' } });
-    const currentContext = toRefundContext(order, parsed.data.selection, { observationId: 'refund-execution-check', observedAt: new Date().toISOString() });
-    const payment = order.payments.find((candidate) => candidate.status.toUpperCase() === 'SETTLED');
-    if (!payment || !currentContext.facts.transactionRefundable || !currentContext.facts.itemSelectionValid || currentContext.facts.refundableAmount.currency !== parsed.data.amount.currency || parsed.data.amount.amountMinor > currentContext.facts.refundableAmount.amountMinor) {
-      return reply.code(409).send({ error: { code: 'refund_no_longer_eligible' } });
-    }
-    const reservation = await repository.reserve({ tenantId: access.tenantId, environmentId: access.environmentId, idempotencyKey: parsed.data.idempotencyKey, workflowId: access.contextId, previewId: parsed.data.previewId, orderId: parsed.data.orderId, amountMinor: parsed.data.amount.amountMinor, currency: parsed.data.amount.currency, occurredAt: new Date().toISOString() });
+    if (!order || order.source.orderId !== parsed.data.orderId || order.customer?.id !== access?.subjectCustomerId) return reply.code(404).send({ error: { code: 'order_not_found' } });
+    const reservation = await repository.reserve({ tenantId: access.tenantId, environmentId: access.environmentId, idempotencyKey: parsed.data.idempotencyKey, workflowId: access.contextId, previewId: parsed.data.previewId, orderId: parsed.data.orderId, amountMinor: parsed.data.amount.amountMinor, currency: parsed.data.amount.currency, selection: parsed.data.selection, reasonCode: parsed.data.reasonCode, occurredAt: new Date().toISOString() });
+    if (reservation.kind === 'conflict') return reply.code(409).send({ error: { code: 'refund_execution_conflict' } });
     if (reservation.kind === 'existing') {
       if (reservation.execution.status === 'SUCCEEDED') return succeededResponse(reservation.execution.providerRefundId);
       if (reservation.execution.status === 'FAILED') return { status: 'FAILED' } satisfies ExecutionResult;
@@ -43,7 +29,20 @@ export function registerRefundExecutionRoutes(app: FastifyInstance, commerceProv
       return { status: 'PENDING_RECONCILIATION' } satisfies ExecutionResult;
     }
     try {
-      const result = await commerceProvider.executeRefund({ paymentId: payment.id, amount: parsed.data.amount, reason: parsed.data.reasonCode });
+      // The first read proves ownership only. Eligibility must be observed
+      // after the order claim commits, never from a pre-reservation snapshot.
+      const claimedOrder = await commerceProvider.getOrderById(parsed.data.orderId);
+      if (!claimedOrder || claimedOrder.source.orderId !== parsed.data.orderId || claimedOrder.customer?.id !== access.subjectCustomerId) {
+        await repository.recordOutcome(reservation.executionId, 'FAILED');
+        return reply.code(404).send({ error: { code: 'order_not_found' } });
+      }
+      const currentContext = toRefundContext(claimedOrder, parsed.data.selection, { observationId: 'refund-execution-check', observedAt: new Date().toISOString() });
+      const payment = claimedOrder.payments.find((candidate) => candidate.status.toUpperCase() === 'SETTLED');
+      if (!payment || !currentContext.facts.transactionRefundable || !currentContext.facts.itemSelectionValid || currentContext.facts.refundableAmount.currency !== parsed.data.amount.currency || parsed.data.amount.amountMinor > currentContext.facts.refundableAmount.amountMinor) {
+        await repository.recordOutcome(reservation.executionId, 'FAILED');
+        return reply.code(409).send({ error: { code: 'refund_no_longer_eligible' } });
+      }
+      const result = await commerceProvider.executeRefund({ orderId: claimedOrder.source.orderId, paymentId: payment.id, amount: parsed.data.amount, reason: parsed.data.reasonCode });
       const response: ExecutionResult = result.status === 'SUBMITTED'
         ? result.providerRefundId === undefined
           ? { status: 'SUBMITTED' }
@@ -61,6 +60,15 @@ export function registerRefundExecutionRoutes(app: FastifyInstance, commerceProv
       return { status: 'PENDING_RECONCILIATION' } satisfies ExecutionResult;
     }
   });
+}
+
+function sameExecutionIntent(authorized: RefundExecutionIntent, requested: RefundExecutionIntent): boolean {
+  return authorized.orderId === requested.orderId && authorized.reasonCode === requested.reasonCode
+    && authorized.previewId === requested.previewId && authorized.idempotencyKey === requested.idempotencyKey
+    && authorized.amount.amountMinor === requested.amount.amountMinor && authorized.amount.currency === requested.amount.currency
+    && authorized.selection.scope === requested.selection.scope
+    && authorized.selection.itemIds.length === requested.selection.itemIds.length
+    && authorized.selection.itemIds.every((itemId, index) => itemId === requested.selection.itemIds[index]);
 }
 
 function succeededResponse(providerRefundId: string | undefined): ExecutionResult { return providerRefundId === undefined ? { status: 'SUCCEEDED' } : { status: 'SUCCEEDED', providerRefundId }; }

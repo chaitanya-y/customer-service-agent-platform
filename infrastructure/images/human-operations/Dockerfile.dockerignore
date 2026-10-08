@@ -1,0 +1,36 @@
+# Defense in depth for direct repository-root BuildKit builds. The local proof
+# stages an explicit context because legacy builders may ignore this file.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/services/
+!apps/services/human-operations/
+!apps/services/human-operations/package.json
+!apps/services/human-operations/tsconfig.json
+!apps/services/human-operations/src/
+!apps/services/human-operations/src/**/*.ts
+!apps/services/human-operations/migrations/
+!apps/services/human-operations/migrations/001_human_operations.sql
+!apps/services/human-operations/migrations/002_exceptional_refund_decision.sql
+!apps/services/human-operations/migrations/003_refund_evidence.sql
+!apps/services/human-operations/migrations/004_decision_outbox_observation_index.sql
+!apps/services/human-operations/migrations/005_delivery_issue_reports.sql
+!apps/services/human-operations/migrations/006_delivery_review_closure.sql
+!packages/
+!packages/observability-node/
+!packages/observability-node/package.json
+!packages/observability-node/index.mjs
+!packages/observability-node/index.d.mts
+**/.env
+**/.env.*
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519

@@ -63,6 +63,7 @@ class LiveRagEvaluationConfig(BaseModel):
     answer_model: str = Field(min_length=1)
     judge_model: str = Field(min_length=1)
     judge_embedding_model: str = Field(min_length=1)
+    judge_max_tokens: int = Field(default=4096, ge=1024, le=8192)
     run_id: str = Field(min_length=1)
     evaluation_version: str = Field(min_length=1)
     repetitions: int = Field(default=1, ge=1, le=5)
@@ -120,7 +121,7 @@ AnswerSystemFactory = Callable[[LiveRagEvaluationConfig], EvaluatedSystem]
 RagasScorerFactory = Callable[[LiveRagEvaluationConfig], RagasMetricScorer]
 
 # RAGAS defaults to 1024; reasoning judges need room to finish structured output.
-_JUDGE_MAX_TOKENS = 4_096
+# The bounded per-run setting is part of the recorded evaluator configuration.
 
 _BUILT_IN_REVIEWED_SYNTHETIC_DATASET_SHA256_BY_PATH = {
     Path(__file__).resolve().parent.parent
@@ -301,7 +302,7 @@ async def _run_live_rag_evaluation(
             version_evidence={
                 "judge_model": config.judge_model,
                 "judge_embedding_model": config.judge_embedding_model,
-                "judge_max_tokens": str(_JUDGE_MAX_TOKENS),
+                "judge_max_tokens": str(config.judge_max_tokens),
             },
         )
         scorer = scorer_factory(config)
@@ -875,7 +876,7 @@ def create_live_ragas_scorer(
             provider="openai",
             client=client,
             temperature=0,
-            max_tokens=_JUDGE_MAX_TOKENS,
+            max_tokens=config.judge_max_tokens,
         )
         embeddings = OpenAIEmbeddings(
             client=client,
@@ -902,6 +903,7 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--answer-model", required=True)
     parser.add_argument("--judge-model", required=True)
     parser.add_argument("--judge-embedding-model", required=True)
+    parser.add_argument("--judge-max-tokens", type=int, default=4096)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--evaluation-version", required=True)
     parser.add_argument("--repetitions", type=int, default=1)
@@ -922,6 +924,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
         answer_model=args.answer_model,
         judge_model=args.judge_model,
         judge_embedding_model=args.judge_embedding_model,
+        judge_max_tokens=args.judge_max_tokens,
         run_id=args.run_id,
         evaluation_version=args.evaluation_version,
         repetitions=args.repetitions,

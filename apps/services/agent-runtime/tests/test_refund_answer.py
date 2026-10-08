@@ -26,7 +26,10 @@ from agent_runtime.refund.answer import (
 )
 from agent_runtime.refund.intent import RefundIntentExtraction
 from agent_runtime.refund.policy import VerifiedRefundPolicy
-from agent_runtime.refund.presentation import format_requested_amount
+from agent_runtime.refund.presentation import (
+    asks_about_personal_automatic_approval,
+    format_requested_amount,
+)
 from agent_runtime.refund.proposal import (
     RefundProposalBuilder,
     RefundProposalVersions,
@@ -55,7 +58,9 @@ class FakeChatModel:
 
 
 class UsageResult(dict[str, object]):
-    def __init__(self, values: dict[str, object], usage_metadata: dict[str, int]) -> None:
+    def __init__(
+        self, values: dict[str, object], usage_metadata: dict[str, int]
+    ) -> None:
         super().__init__(values)
         self.usage_metadata = usage_metadata
 
@@ -148,6 +153,201 @@ async def test_answer_composer_uses_internal_purpose_without_changing_public_sha
     assert chat_model.output_schema is DraftCustomerAnswer
     assert set(answer.model_dump(by_alias=True)) == {"message", "citations"}
     assert answer.message.startswith("Your requested refund of $100")
+
+
+@pytest.mark.asyncio
+async def test_explicit_personal_automatic_approval_question_uses_trusted_amount_review(
+    order_context: OrderContext,
+) -> None:
+    composer = LangChainRefundAnswerComposer(
+        FakeChatModel(
+            FakeStructuredModel(
+                {
+                    "message": "Automatic approval depends on the refund policy.",
+                    "citations": [
+                        {
+                            "knowledgeDocumentId": "refund-policy-current-2026-08-01",
+                            "chunkId": "section-003-chunk-001",
+                        }
+                    ],
+                    "purpose": "policy_question",
+                }
+            )
+        )  # type: ignore[arg-type]
+    )
+    answer = await composer.compose(
+        customer_message="Will my larger refund request be approved automatically?",
+        refund_proposal=make_proposal(order_context),
+        order_context=order_context,
+        knowledge_evidence=[make_evidence()],
+        refund_policy=make_verified_policy(),
+    )
+
+    assert answer.message == (
+        "Your requested refund of $100 is at or below the $100 automatic-approval "
+        "limit. Automatic approval is possible only after eligibility and evidence checks."
+    )
+    assert answer.citations == []
+
+
+@pytest.mark.asyncio
+async def test_general_approval_policy_question_does_not_quote_personal_amount(
+    order_context: OrderContext,
+) -> None:
+    composer = LangChainRefundAnswerComposer(
+        FakeChatModel(
+            FakeStructuredModel(
+                {
+                    "message": "Small requests may be considered for automatic approval after eligibility checks.",
+                    "citations": [],
+                    "purpose": "policy_question",
+                }
+            )
+        )  # type: ignore[arg-type]
+    )
+    answer = await composer.compose(
+        customer_message="What is the general automatic approval policy?",
+        refund_proposal=make_proposal(order_context),
+        order_context=order_context,
+        knowledge_evidence=[make_evidence()],
+        refund_policy=make_verified_policy(),
+    )
+
+    assert (
+        answer.message
+        == "Small requests may be considered for automatic approval after eligibility checks."
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Will my larger refund request be approved automatically?", True),
+        ("Can my refund be auto-approved?", True),
+        ("Will the refund for my order be automatically approved?", True),
+        ("Is my refund eligible for automatic approval?", True),
+        (
+            "Can my refund be automatically approved if I already uploaded the evidence?",
+            True,
+        ),
+        (
+            "Can my refund be automatically approved for an item that has been damaged?",
+            True,
+        ),
+        ("What is the general automatic approval policy?", False),
+        ("Was my refund automatically approved?", False),
+        ("Could my refund have already been automatically approved?", False),
+        ("Will my refund automatically go back to my card?", False),
+        ("Was my refund automatically approved, and when will it arrive?", False),
+        (
+            "Can you explain the general automatic approval policy? My refund is still pending.",
+            False,
+        ),
+        ("My refund amount is incorrect.", False),
+    ],
+)
+def test_personal_automatic_approval_detection_is_narrow(
+    message: str, expected: bool
+) -> None:
+    assert asks_about_personal_automatic_approval(message) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "customer_message",
+    [
+        "Was my refund automatically approved, and when will it arrive?",
+        "Will my refund automatically go back to my card?",
+        "Can you explain the general automatic approval policy? My refund is still pending.",
+    ],
+)
+async def test_past_or_general_questions_preserve_model_purpose(
+    order_context: OrderContext, customer_message: str
+) -> None:
+    composer = LangChainRefundAnswerComposer(
+        FakeChatModel(
+            FakeStructuredModel(
+                {
+                    "message": "I can explain the policy, but I cannot confirm a prior approval here.",
+                    "citations": [],
+                    "purpose": "policy_question",
+                }
+            )
+        )  # type: ignore[arg-type]
+    )
+    answer = await composer.compose(
+        customer_message=customer_message,
+        refund_proposal=make_proposal(order_context),
+        order_context=order_context,
+        knowledge_evidence=[make_evidence()],
+        refund_policy=make_verified_policy(),
+    )
+
+    assert answer.message == (
+        "I can explain the policy, but I cannot confirm a prior approval here."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "customer_message",
+    [
+        "Will the refund for my order be automatically approved?",
+        "Is my refund eligible for automatic approval?",
+        "Can my refund be automatically approved if I already uploaded the evidence?",
+        "Can my refund be automatically approved for an item that has been damaged?",
+    ],
+)
+async def test_other_personal_future_questions_use_trusted_amount_review(
+    order_context: OrderContext, customer_message: str
+) -> None:
+    composer = LangChainRefundAnswerComposer(
+        FakeChatModel(
+            FakeStructuredModel(
+                {
+                    "message": "Approval depends on the refund policy.",
+                    "citations": [],
+                    "purpose": "policy_question",
+                }
+            )
+        )  # type: ignore[arg-type]
+    )
+    answer = await composer.compose(
+        customer_message=customer_message,
+        refund_proposal=make_proposal(order_context),
+        order_context=order_context,
+        knowledge_evidence=[make_evidence()],
+        refund_policy=make_verified_policy(),
+    )
+
+    assert answer.message.startswith("Your requested refund of $100")
+    assert answer.citations == []
+
+
+@pytest.mark.asyncio
+async def test_forced_amount_review_still_rejects_unsafe_raw_model_money(
+    order_context: OrderContext,
+) -> None:
+    composer = LangChainRefundAnswerComposer(
+        FakeChatModel(
+            FakeStructuredModel(
+                {
+                    "message": "Your $100 refund is automatically approved.",
+                    "citations": [],
+                    "purpose": "policy_question",
+                }
+            )
+        )  # type: ignore[arg-type]
+    )
+    with pytest.raises(RefundAnswerCompositionError) as captured:
+        await composer.compose(
+            customer_message="Will my refund request be approved automatically?",
+            refund_proposal=make_proposal(order_context),
+            order_context=order_context,
+            knowledge_evidence=[make_evidence()],
+            refund_policy=make_verified_policy(),
+        )
+    assert captured.value.reason_code.value == "MONEY_TEXT_REJECTED"
 
 
 @pytest.mark.asyncio
@@ -268,6 +468,10 @@ async def test_answer_composer_tells_the_model_to_limit_delivery_window_explanat
     assert "Do not ask the customer for a delivery date" in system_prompt
     assert "Do not claim the customer's" in system_prompt
     assert "request is inside or outside a delivery window" in system_prompt
+    assert (
+        "For a final-sale question, do not add an unrelated change-of-mind"
+        in system_prompt
+    )
 
 
 @pytest.mark.asyncio
@@ -1166,6 +1370,16 @@ async def test_answer_composer_rejects_delivery_window_without_supporting_citati
         ),
         (
             (
+                "For non-final-sale physical goods, refunds may be issued within "
+                "14 calendar days of delivery after the item is returned and inspected."
+            ),
+            (
+                "Unopened, non-final-sale physical goods may be refunded within 14 "
+                "calendar days of delivery after the item is returned and inspected."
+            ),
+        ),
+        (
+            (
                 "The published policy does not allow damaged-item refund requests "
                 "within 30 calendar days of delivery."
             ),
@@ -1267,6 +1481,11 @@ async def test_answer_composer_rejects_personalized_delivery_conclusions_and_dat
             "exception has yet been verified for the supplied item, it does not "
             "meet the standard refund eligibility."
         ),
+        (
+            "For your order ORDER-123, a refund would not be available "
+            "for a final-sale item unless an exception applies."
+        ),
+        "Your item cannot be refunded under the final-sale policy.",
     ],
 )
 async def test_answer_composer_rejects_singular_personalized_eligibility_denial(

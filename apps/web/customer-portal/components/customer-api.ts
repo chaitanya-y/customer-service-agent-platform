@@ -23,7 +23,7 @@ export type RefundJourney = Readonly<{
     expiresAt?: string;
   }>;
   evidence?: RefundEvidence;
-  nextAction: "CONFIRM_OR_DECLINE" | "PROVIDE_EVIDENCE" | "WAIT" | "NONE";
+  nextAction: "CONFIRM_OR_DECLINE" | "PROVIDE_EVIDENCE" | "WAIT" | "CONTACT_SUPPORT" | "NONE";
   nextActionLabel: string;
   timeline: readonly JourneyTimelineEvent[];
 }>;
@@ -90,6 +90,7 @@ function normalizeNextAction(value: unknown, hasPreview: boolean): RefundJourney
   const action = isRecord(value) ? asText(value.type, 48) : undefined;
   if (action === "CONFIRM_REFUND" && hasPreview) return "CONFIRM_OR_DECLINE";
   if (action === "PROVIDE_EVIDENCE") return "PROVIDE_EVIDENCE";
+  if (action === "CONTACT_SUPPORT") return "CONTACT_SUPPORT";
   if (action === "WAIT_FOR_SPECIALIST" || action === "WAIT_FOR_REFUND") return "WAIT";
   return "NONE";
 }

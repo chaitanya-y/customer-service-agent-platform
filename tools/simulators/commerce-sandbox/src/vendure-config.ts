@@ -11,6 +11,7 @@ import { DashboardPlugin } from '@vendure/dashboard/plugin';
 import { GraphiqlPlugin } from '@vendure/graphiql-plugin';
 import 'dotenv/config';
 import path from 'path';
+import { ZeroTotalCancellationPlugin } from './plugins/zero-total-cancellation/plugin';
 
 const IS_DEV = process.env.APP_ENV === 'dev';
 const serverPort = +process.env.PORT || 3000;
@@ -55,6 +56,7 @@ export const config: VendureConfig = {
     // need to be updated. See the "Migrations" section in README.md.
     customFields: {},
     plugins: [
+        ZeroTotalCancellationPlugin,
         GraphiqlPlugin.init(),
         AssetServerPlugin.init({
             route: 'assets',
@@ -77,7 +79,7 @@ export const config: VendureConfig = {
                 // The following variables will change depending on your storefront implementation.
                 // Here we are assuming a storefront running at http://localhost:8080.
                 fromAddress: '"example" <noreply@example.com>',
-                verifyEmailAddressUrl: 'http://localhost:8080/verify',
+                verifyEmailAddressUrl: 'http://127.0.0.1:3103/account/verify',
                 passwordResetUrl: 'http://localhost:8080/password-reset',
                 changeEmailAddressUrl: 'http://localhost:8080/verify-email-address-change'
             },

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
+import { safeStaffFetch } from "./safe-staff-fetch";
 
 export const LOCAL_HUMAN_SESSION_COOKIE = "cso_local_human_session";
 
@@ -89,7 +90,7 @@ export async function proxyHumanOperations(input: Readonly<{
   }
 
   try {
-    const upstreamResponse = await fetch(endpoint, {
+    const upstreamResponse = await safeStaffFetch(endpoint, {
       method: input.method,
       body: input.body,
       cache: "no-store",
@@ -125,7 +126,7 @@ export function getIdempotencyKey(request: NextRequest): string | NextResponse {
 
 export async function proxyHumanEvidenceContent(input: { assertion: HumanAuthorization; path: string }): Promise<NextResponse> {
   try {
-    const upstream = await fetch(new URL(input.path, HUMAN_OPERATIONS_BASE_URL), {
+    const upstream = await safeStaffFetch(new URL(input.path, HUMAN_OPERATIONS_BASE_URL), {
       cache: "no-store", headers: { "x-cso-human-assertion": input.assertion.assertion },
     });
     if (!upstream.ok) {

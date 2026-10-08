@@ -3,10 +3,12 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "@temporalio/worker";
 
 import type { RefundWorkflowActivities } from "./refund-workflow-activities.js";
+import type { ZeroTotalCancellationActivities } from './zero-total-cancellation-activities.js';
+import type { AuthorizedDummyCancellationActivities } from './authorized-dummy-cancellation-activities.js';
 
 type RefundWorkerOptions = Readonly<{
   taskQueue: string;
-  activities: RefundWorkflowActivities;
+  activities: RefundWorkflowActivities & ZeroTotalCancellationActivities & AuthorizedDummyCancellationActivities;
   temporalAddress?: string;
 }>;
 
@@ -17,11 +19,16 @@ export async function runRefundWorker({
   temporalAddress,
 }: RefundWorkerOptions): Promise<void> {
   const worker = await Worker.create({
-    workflowsPath: fileURLToPath(new URL("./refund-workflow.ts", import.meta.url)),
+    workflowsPath: resolveWorkflowsPath(import.meta.url),
     activities,
     taskQueue,
     ...(temporalAddress === undefined ? {} : { connectionOptions: { address: temporalAddress } }),
   });
 
   await worker.run();
+}
+
+export function resolveWorkflowsPath(workerModuleUrl: string): string {
+  const extension = fileURLToPath(workerModuleUrl).endsWith('.ts') ? '.ts' : '.js';
+  return fileURLToPath(new URL(`./workflows${extension}`, workerModuleUrl));
 }

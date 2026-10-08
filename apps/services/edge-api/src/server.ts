@@ -10,7 +10,12 @@ import {
 } from './context-assertion.js';
 import { createLocalCustomerIdentityVerifier } from './local-customer-auth.js';
 import { createTemporalRefundClient } from './temporal-refund-client.js';
+import { createTemporalCancellationClient } from './temporal-cancellation-client.js';
 import { createEvidenceAssertionSigner, createRefundEvidenceClient } from './refund-evidence-client.js';
+import { createDeliveryReportAssertionSigner } from './delivery-report-assertion.js';
+import { createDeliveryReportClient } from './delivery-report-client.js';
+import { createSavedAddressStatusClient } from './saved-address-status-client.js';
+import { createRecentOrderReferencesClient } from './recent-order-references-client.js';
 import type { TelemetryHandle } from '@cso/observability-node';
 import { closeFastifyWithin, runWithin } from './observability.js';
 
@@ -82,8 +87,13 @@ export async function startServer({ telemetry }: { telemetry: TelemetryHandle })
   const temporalConnection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
   });
+  const workflowClient = new WorkflowClient({ connection: temporalConnection });
   const temporalRefundClient = createTemporalRefundClient({
-    client: new WorkflowClient({ connection: temporalConnection }),
+    client: workflowClient,
+    taskQueue: config.TEMPORAL_TASK_QUEUE,
+  });
+  const temporalCancellationClient = createTemporalCancellationClient({
+    client: workflowClient,
     taskQueue: config.TEMPORAL_TASK_QUEUE,
   });
   const refundEvidenceClient = createRefundEvidenceClient({
@@ -94,6 +104,15 @@ export async function startServer({ telemetry }: { telemetry: TelemetryHandle })
       issuer: config.CONTEXT_ASSERTION_ISSUER,
     }),
   });
+  const deliveryReportClient = createDeliveryReportClient({
+    gatewayBaseUrl: config.INTEGRATION_GATEWAY_BASE_URL,
+    humanOperationsBaseUrl: config.HUMAN_OPERATIONS_BASE_URL,
+    timeoutMilliseconds: config.DELIVERY_REPORT_REQUEST_TIMEOUT_MILLISECONDS,
+  });
+  const savedAddressStatusClient = createSavedAddressStatusClient({
+    baseUrl: config.INTEGRATION_GATEWAY_BASE_URL,
+    timeoutMilliseconds: config.DELIVERY_REPORT_REQUEST_TIMEOUT_MILLISECONDS,
+  });
   const app = buildApp({
     verifyCustomerIdentity,
     signContextAssertion,
@@ -101,16 +120,35 @@ export async function startServer({ telemetry }: { telemetry: TelemetryHandle })
     signKnowledgeRagContextAssertion,
     signConversationRuntimeContextAssertion,
     signEdgeServiceAssertion,
+    signDeliveryReportAssertion: createDeliveryReportAssertionSigner({
+      secret: config.CONTEXT_ASSERTION_HMAC_SECRET,
+      issuer: config.CONTEXT_ASSERTION_ISSUER,
+      audience: config.DELIVERY_REPORT_ASSERTION_AUDIENCE,
+    }),
     intakeRefund: agentRuntimeClient.intakeRefund,
+    intakeSupport: agentRuntimeClient.intakeSupport,
     createConversation: conversationRuntimeClient.createConversation,
     getConversation: conversationRuntimeClient.getConversation,
+    getRefundStart: conversationRuntimeClient.getRefundStart,
+    ...(config.HUMAN_CHAT_HANDOFF_ENABLED
+      ? { requestHumanHandoff: conversationRuntimeClient.requestHumanHandoff }
+      : {}),
     acceptCustomerMessage: conversationRuntimeClient.acceptCustomerMessage,
     appendAssistantMessage: conversationRuntimeClient.appendAssistantMessage,
     linkRefundWorkflow: conversationRuntimeClient.linkRefundWorkflow,
     startRefundWorkflow: temporalRefundClient.startRefundWorkflow,
     getRefundWorkflow: temporalRefundClient.getRefundWorkflow,
     confirmRefundWorkflow: temporalRefundClient.confirmRefundWorkflow,
+    startCancellationWorkflow: temporalCancellationClient.startCancellationWorkflow,
+    getCancellationWorkflow: temporalCancellationClient.getCancellationWorkflow,
+    confirmCancellationWorkflow: temporalCancellationClient.confirmCancellationWorkflow,
     refundEvidenceClient,
+    deliveryReportClient,
+    savedAddressStatusClient,
+    recentOrderReferencesClient: createRecentOrderReferencesClient({
+      baseUrl: config.INTEGRATION_GATEWAY_BASE_URL,
+      timeoutMilliseconds: config.DELIVERY_REPORT_REQUEST_TIMEOUT_MILLISECONDS,
+    }),
     refundPolicyVersion: config.REFUND_POLICY_VERSION,
     logger: true,
     telemetry,

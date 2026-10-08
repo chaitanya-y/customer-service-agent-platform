@@ -103,3 +103,17 @@ test('getOrderContext hides an order owned by another customer', async () => {
 
   assert.equal(orderContext, null);
 });
+
+test('getOrderContext hides a different order returned for the requested reference', async () => {
+  const getOrderContext = createGetOrderContext({
+    commerceProvider: {
+      async getOrderByReference() {
+        return { ...commerceOrder, reference: 'ORDER-999' };
+      },
+    },
+  });
+
+  const orderContext = await getOrderContext('ORDER-123', TEST_ACCESS_CONTEXT);
+
+  assert.equal(orderContext, null);
+});

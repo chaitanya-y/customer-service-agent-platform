@@ -11,8 +11,8 @@ was retested end to end.
 - [Current architecture v1.1](architecture/KLEEM_AI_ARCHITECTURE_V1_1.md):
   implemented boundaries and accepted deployment target. It takes precedence
   over conflicting pages in the older [combined PDF](reference/README.md).
-- [Codex handoff](CODEX_HANDOFF.md): current working-tree and task handoff.
-- [Verification status](VERIFICATION_STATUS.md): exact local checks and limits.
+- [Codex handoff](CODEX_HANDOFF.md): current task handoff and October 8 precommit checks.
+- [Verification status](VERIFICATION_STATUS.md): dated journey checks and limits.
 - [Decision log](DECISION_LOG.md) and [ADR](adr/ADR-001-polyglot-runtime-and-mcp-boundaries.md):
   accepted decisions.
 - [Project context](PROJECT_CONTEXT.md): detailed September 20 baseline and

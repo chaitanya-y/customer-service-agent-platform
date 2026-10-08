@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { test } from 'node:test';
 
-import { createHumanOperationsCaseClient } from '../src/human-operations-case-client.js';
+import { createHumanOperationsCaseClient, HumanOperationsUnavailableError } from '../src/human-operations-case-client.js';
 import type {
   CloseHumanCaseInput,
   OpenHumanCaseInput,
@@ -53,6 +55,45 @@ const closeCase: CloseHumanCaseInput = {
     decidedAt: '2026-08-22T12:00:00.000Z',
   },
 };
+
+test('rejects cross-origin case redirects without forwarding workflow assertions or case packets', async (t) => {
+  let redirectedRequests = 0;
+  const capture = createServer((_request, response) => {
+    redirectedRequests += 1;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ refund_case: { case_id: 'synthetic-case' } }));
+  });
+  const upstreamPaths: string[] = [];
+  const upstream = createServer((request, response) => {
+    upstreamPaths.push(request.url ?? '');
+    response.writeHead(307, { location: `http://127.0.0.1:${capturePort}/capture` });
+    response.end();
+  });
+  t.after(() => {
+    capture.closeAllConnections();
+    upstream.closeAllConnections();
+    capture.close();
+    upstream.close();
+  });
+  capture.listen(0, '127.0.0.1');
+  await once(capture, 'listening');
+  const captureAddress = capture.address();
+  assert.ok(captureAddress && typeof captureAddress !== 'string');
+  const capturePort = captureAddress.port;
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamAddress = upstream.address();
+  assert.ok(upstreamAddress && typeof upstreamAddress !== 'string');
+  const client = createHumanOperationsCaseClient({
+    baseUrl: `http://127.0.0.1:${upstreamAddress.port}`,
+    expectedTenantId: 'tenant-local', expectedEnvironmentId: 'local',
+    signWorkflowAccessAssertion: async () => 'synthetic-workflow-assertion',
+  });
+  await assert.rejects(client.openHumanCase(openCase), HumanOperationsUnavailableError);
+  await assert.rejects(client.closeHumanCase(closeCase), HumanOperationsUnavailableError);
+  assert.deepEqual(upstreamPaths, ['/internal/v1/refund-cases', '/internal/v1/refund-cases/case%3Arefund-001/close']);
+  assert.equal(redirectedRequests, 0);
+});
 
 test('opens and closes a human case through the signed, idempotent boundary', async () => {
   const calls: Array<{ url: string; request: RequestInit | undefined }> = [];

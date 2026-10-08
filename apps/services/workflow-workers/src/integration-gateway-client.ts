@@ -79,6 +79,7 @@ export function createIntegrationGatewayRefundContextClient({
       try {
         response = await fetchImpl(endpoint, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'content-type': 'application/json',
             [WORKFLOW_ACCESS_ASSERTION_HEADER]: assertion,
@@ -107,12 +108,20 @@ export function createIntegrationGatewayRefundContextClient({
       if (access.tenantId !== expectedTenantId || access.environmentId !== expectedEnvironmentId) {
         throw new Error('WORKFLOW_ACCESS_SCOPE_MISMATCH');
       }
-      const assertion = await signWorkflowAccessAssertion({ workflowId, access, purpose: 'refund_execute' });
+      const refundExecution = {
+        orderId: proposal.intent.orderId,
+        reasonCode: proposal.intent.reasonCode,
+        amount: preview.requestedAmount,
+        selection: preview.selection,
+        previewId: preview.previewId,
+        idempotencyKey: `refund:${workflowId}:${preview.previewId}`,
+      };
+      const assertion = await signWorkflowAccessAssertion({ workflowId, access, purpose: 'refund_execute', refundExecution });
       let response: Response;
       try {
         response = await fetchImpl(executionEndpoint, {
-          method: 'POST', headers: { 'content-type': 'application/json', [WORKFLOW_ACCESS_ASSERTION_HEADER]: assertion },
-          body: JSON.stringify({ orderId: proposal.intent.orderId, reasonCode: proposal.intent.reasonCode, amount: preview.requestedAmount, selection: preview.selection, previewId: preview.previewId, idempotencyKey: `refund:${workflowId}:${preview.previewId}` }),
+          method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', [WORKFLOW_ACCESS_ASSERTION_HEADER]: assertion },
+          body: JSON.stringify(refundExecution),
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch { return { status: 'PENDING_RECONCILIATION' }; }
@@ -126,7 +135,7 @@ export function createIntegrationGatewayRefundContextClient({
     async reconcileRefund(input) {
       const assertion = await signWorkflowAccessAssertion({ workflowId: input.workflowId, access: input.access, purpose: 'refund_reconcile' });
       let response: Response;
-      try { response = await fetchImpl(reconciliationEndpoint, { method: 'POST', headers: { 'content-type': 'application/json', [WORKFLOW_ACCESS_ASSERTION_HEADER]: assertion }, body: JSON.stringify({ orderId: input.proposal.intent.orderId, previewId: input.preview.previewId, amount: input.preview.requestedAmount }), signal: AbortSignal.timeout(timeoutMilliseconds) }); } catch { return { status: 'NOT_FOUND' }; }
+      try { response = await fetchImpl(reconciliationEndpoint, { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', [WORKFLOW_ACCESS_ASSERTION_HEADER]: assertion }, body: JSON.stringify({ orderId: input.proposal.intent.orderId, previewId: input.preview.previewId, amount: input.preview.requestedAmount }), signal: AbortSignal.timeout(timeoutMilliseconds) }); } catch { return { status: 'NOT_FOUND' }; }
       if (!response.ok) return { status: 'NOT_FOUND' };
       const result = z.object({ status: z.enum(['SUCCEEDED', 'FAILED', 'PROCESSING', 'NOT_FOUND']), providerRefundId: z.string().optional() }).strict().parse(await response.json());
       return result.providerRefundId === undefined ? { status: result.status } : { status: result.status, providerRefundId: result.providerRefundId };

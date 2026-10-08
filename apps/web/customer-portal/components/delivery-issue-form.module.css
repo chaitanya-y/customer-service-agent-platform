@@ -1,0 +1,136 @@
+.panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  display: grid;
+  gap: 20px;
+  margin-top: 24px;
+  padding: 28px 32px;
+}
+
+.intro h2 {
+  font-size: clamp(22px, 3vw, 28px);
+  letter-spacing: -0.03em;
+  margin: 8px 0;
+}
+
+.intro p {
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 66ch;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.form label {
+  font-weight: 700;
+}
+
+.form input,
+.form select {
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-primary);
+  min-height: 44px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.form button {
+  justify-self: start;
+  margin-top: 8px;
+}
+
+.statusCard {
+  background: var(--accent-soft);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+}
+
+.historyPanel {
+  border-top: 1px solid var(--border-subtle);
+  display: grid;
+  gap: 12px;
+  padding-top: 20px;
+}
+
+.historyPanel h3,
+.historyPanel p {
+  margin: 0;
+}
+
+.historyPanel > button {
+  justify-self: start;
+}
+
+.historyList {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.historyList button {
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-primary);
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.historyList button:hover,
+.historyList button:focus-visible {
+  border-color: var(--text-secondary);
+}
+
+.historyList button span:last-child {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.statusCard h3,
+.statusCard p {
+  margin: 0;
+}
+
+.statusMessage {
+  font-weight: 700;
+}
+
+.reportDetail,
+.refreshNote {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.error {
+  background: color-mix(in srgb, #a72d35 16%, var(--surface-raised));
+  border-radius: 8px;
+  color: var(--text-primary);
+  margin: 0;
+  padding: 12px 14px;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 20px;
+  }
+  .form button {
+    justify-self: stretch;
+  }
+  .historyPanel > button {
+    justify-self: stretch;
+  }
+}

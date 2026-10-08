@@ -1,0 +1,35 @@
+# BuildKit-only defense in depth for a repository-root context. Docker's legacy
+# builder did not honor this file in local proof, so the proof script stages
+# an explicit small context instead of relying on these rules.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/services/
+!apps/services/edge-api/
+!apps/services/edge-api/package.json
+!apps/services/edge-api/tsconfig.json
+!apps/services/edge-api/src/
+!apps/services/edge-api/src/**/*.ts
+!packages/
+!packages/observability-node/
+!packages/observability-node/package.json
+!packages/observability-node/index.mjs
+!packages/observability-node/index.d.mts
+!packages/refund-policy/
+!packages/refund-policy/index.mjs
+!packages/refund-policy/index.d.mts
+!packages/refund-policy/releases.json
+# Defense in depth even if the source allowlist is widened later.
+**/.env
+**/.env.*
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519

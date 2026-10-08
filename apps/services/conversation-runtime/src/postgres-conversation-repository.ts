@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import {
@@ -7,8 +8,11 @@ import {
   type ConversationRepository,
   type ConversationTranscript,
   type CreateConversationPersistenceResult,
+  type RefundStartInput,
+  type RefundStartReservation,
 } from './conversation-service.js';
 import type { ProtectedMessage, UnprotectMessage } from './message-protection.js';
+import { HandoffConflictError } from './handoff-state.js';
 
 type IdempotencyRow = QueryResultRow & {
   canonical_request_hash: string;
@@ -22,12 +26,13 @@ type ConversationResult = {
 type MessageResult = {
   messageId: string;
   sequenceNumber: number;
+  refundStart?: RefundStartReservation;
 };
 
 type StoredMessageRow = QueryResultRow & {
   message_id: string;
   sequence_number: string;
-  sender_kind: 'END_CUSTOMER' | 'ASSISTANT';
+  sender_kind: 'END_CUSTOMER' | 'ASSISTANT' | 'WORKFORCE';
   content_length: number;
   content_sha256: string;
   created_at: Date;
@@ -36,6 +41,19 @@ type StoredMessageRow = QueryResultRow & {
   initialization_vector: Buffer;
   authentication_tag: Buffer;
   encryption_key_version: string;
+};
+
+type RefundStartRow = QueryResultRow & {
+  workflow_id: string;
+  assistant_message_id: string;
+  status: 'PENDING' | 'STARTED' | 'ABORTED';
+  created_at: Date;
+  start_input_ciphertext: Buffer | null;
+  start_input_iv: Buffer | null;
+  start_input_tag: Buffer | null;
+  start_input_key_version: string | null;
+  start_input_sha256: string | null;
+  start_input_length: number | null;
 };
 
 type AppendMessageRecord =
@@ -113,10 +131,14 @@ export class PostgresConversationRepository
         );
         ensureMatchingRequest(existing, record.canonicalRequestHash);
         const result = parseConversationResult(existing.result_json);
+        const current = await client.query<{ status: 'OPEN' | 'CLOSED'; control_mode: 'AI' | 'QUEUED' | 'HUMAN'; control_version: string; handoff_session_id: string | null }>(`SELECT status,control_mode,control_version,handoff_session_id FROM conversation.conversations WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 AND subject_customer_id=$4 FOR SHARE`, [record.context.tenantId, record.context.environmentId, result.conversationId, record.context.subjectCustomerId]);
+        if (!current.rows[0]) throw new ConversationUnavailableError();
+        const stored = current.rows[0];
 
         return {
           status: 'duplicate',
           conversationId: result.conversationId,
+          currentState: { status: stored.status, controlMode: stored.control_mode, controlVersion: Number(stored.control_version), ...(stored.handoff_session_id ? { handoffSessionId: stored.handoff_session_id } : {}) },
         };
       }
 
@@ -182,16 +204,19 @@ export class PostgresConversationRepository
   ): Promise<ConversationTranscript> {
     return this.inTransaction(context, async (client) => {
       const conversation = await client.query<{
-        status: 'OPEN';
+        status: 'OPEN' | 'CLOSED';
         control_mode: 'AI' | 'QUEUED' | 'HUMAN';
+        control_version: string;
+        handoff_session_id: string | null;
       }>(
         `
-          SELECT status, control_mode
+          SELECT status, control_mode, control_version, handoff_session_id
           FROM conversation.conversations
           WHERE tenant_id = $1
             AND environment_id = $2
             AND conversation_id = $3
             AND subject_customer_id = $4
+          FOR SHARE
         `,
         [
           context.tenantId,
@@ -227,7 +252,7 @@ export class PostgresConversationRepository
             AND message.environment_id = $2
             AND message.conversation_id = $3
             AND message.status = 'COMMITTED'
-            AND message.sender_kind IN ('END_CUSTOMER', 'ASSISTANT')
+            AND message.sender_kind IN ('END_CUSTOMER', 'ASSISTANT', 'WORKFORCE')
           ORDER BY message.sequence_number ASC
         `,
         [context.tenantId, context.environmentId, conversationId],
@@ -238,6 +263,8 @@ export class PostgresConversationRepository
         conversationId,
         status: storedConversation.status,
         controlMode: storedConversation.control_mode,
+        controlVersion: Number(storedConversation.control_version),
+        ...(storedConversation.handoff_session_id ? { handoffSessionId: storedConversation.handoff_session_id } : {}),
         messages: messages.rows.map((message) => ({
           messageId: message.message_id,
           sequenceNumber: Number(message.sequence_number),
@@ -311,6 +338,11 @@ export class PostgresConversationRepository
       ) {
         throw new IdempotencyConflictError();
       }
+      const reservation = await client.query<{ workflow_id: string; status: string }>(`SELECT workflow_id,status FROM conversation.refund_start_reservations WHERE tenant_id=$1 AND environment_id=$2 AND assistant_message_id=$3 FOR UPDATE`, [record.context.tenantId, record.context.environmentId, record.messageId]);
+      if (reservation.rows[0]) {
+        if (reservation.rows[0].workflow_id !== record.workflowId || reservation.rows[0].status === 'ABORTED') throw new IdempotencyConflictError();
+        await client.query(`UPDATE conversation.refund_start_reservations SET status='STARTED',updated_at=$4 WHERE tenant_id=$1 AND environment_id=$2 AND assistant_message_id=$3`, [record.context.tenantId, record.context.environmentId, record.messageId, record.occurredAt]);
+      }
 
       if (storedMessage.refund_workflow_id === null) {
         await client.query(
@@ -349,6 +381,86 @@ export class PostgresConversationRepository
     });
   }
 
+  async resolveRefundStart(record: Parameters<ConversationRepository['resolveRefundStart']>[0]): Promise<{ workflowId: string; status: 'STARTED' | 'ABORTED' }> {
+    return this.inTransaction(record.context, async (client) => {
+      const conversation = await client.query<{ subject_customer_id: string }>(`SELECT subject_customer_id FROM conversation.conversations WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 FOR UPDATE`, [record.context.tenantId, record.context.environmentId, record.conversationId]);
+      if (conversation.rows[0]?.subject_customer_id !== record.context.subjectCustomerId) throw new ConversationUnavailableError();
+      const operation = 'conversation.resolve-refund-start';
+      const scope = `${record.conversationId}:${record.workflowId}`;
+      const previous = await this.findIdempotencyResult(client, record.context.tenantId, record.context.environmentId, operation, scope, record.idempotencyKey);
+      if (previous) {
+        ensureMatchingRequest(previous, record.canonicalRequestHash);
+        const result = previous.result_json as { workflowId: string; status: 'STARTED' | 'ABORTED' };
+        if (result.workflowId !== record.workflowId || result.status !== record.status) throw new IdempotencyConflictError();
+        return result;
+      }
+      const reservation = await client.query<{ status: string }>(`SELECT workflow_id,status FROM conversation.refund_start_reservations WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 AND workflow_id=$4 FOR UPDATE`, [record.context.tenantId, record.context.environmentId, record.conversationId, record.workflowId]);
+      if (reservation.rowCount !== 1) throw new ConversationUnavailableError();
+      if (reservation.rows[0]?.status !== 'PENDING' && reservation.rows[0]?.status !== record.status) throw new IdempotencyConflictError();
+      await client.query(`UPDATE conversation.refund_start_reservations SET status=$5,updated_at=$6 WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 AND workflow_id=$4`, [record.context.tenantId, record.context.environmentId, record.conversationId, record.workflowId, record.status, record.occurredAt]);
+      const result = { workflowId: record.workflowId, status: record.status };
+      await client.query(`INSERT INTO events.idempotency_keys(tenant_id,environment_id,operation,resource_scope,idempotency_key,canonical_request_hash,result_json,created_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`, [record.context.tenantId, record.context.environmentId, operation, scope, record.idempotencyKey, record.canonicalRequestHash, JSON.stringify(result), record.occurredAt]);
+      return result;
+    });
+  }
+
+  async findRefundStart(
+    context: Parameters<ConversationRepository['findRefundStart']>[0],
+    conversationId: string,
+    assistantClientMessageId: string,
+  ): Promise<RefundStartReservation | undefined> {
+    return this.inTransaction(context, async (client) => {
+      const conversation = await client.query<{ subject_customer_id: string }>(
+        `SELECT subject_customer_id FROM conversation.conversations WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 FOR SHARE`,
+        [context.tenantId, context.environmentId, conversationId],
+      );
+      if (conversation.rows[0]?.subject_customer_id !== context.subjectCustomerId) throw new ConversationUnavailableError();
+      const reservation = await client.query<RefundStartRow>(
+        `SELECT reservation.workflow_id,reservation.assistant_message_id,reservation.status,reservation.created_at,
+                reservation.start_input_ciphertext,reservation.start_input_iv,reservation.start_input_tag,
+                reservation.start_input_key_version,reservation.start_input_sha256,reservation.start_input_length
+         FROM conversation.refund_start_reservations AS reservation
+         JOIN conversation.messages AS message
+           ON message.tenant_id=reservation.tenant_id AND message.environment_id=reservation.environment_id
+          AND message.message_id=reservation.assistant_message_id AND message.conversation_id=reservation.conversation_id
+         WHERE reservation.tenant_id=$1 AND reservation.environment_id=$2 AND reservation.conversation_id=$3
+           AND message.client_message_id=$4 AND message.sender_kind='ASSISTANT'`,
+        [context.tenantId, context.environmentId, conversationId, `assistant:${assistantClientMessageId}`],
+      );
+      return reservation.rows[0] ? this.toRefundStart(reservation.rows[0], context) : undefined;
+    });
+  }
+
+  private toRefundStart(row: RefundStartRow, context: { tenantId: string; environmentId: string; subjectCustomerId: string }): RefundStartReservation {
+    const result: RefundStartReservation = {
+      workflowId: row.workflow_id,
+      assistantMessageId: row.assistant_message_id,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+    };
+    if (row.start_input_ciphertext === null) return result; // Legacy reservation: manual reconciliation only.
+    if (row.start_input_iv === null || row.start_input_tag === null || row.start_input_key_version === null || row.start_input_sha256 === null || row.start_input_length === null) throw new Error('Refund start encryption record is incomplete');
+    const plaintext = this.unprotectMessage({
+      ciphertext: row.start_input_ciphertext,
+      initializationVector: row.start_input_iv,
+      authenticationTag: row.start_input_tag,
+      encryptionKeyVersion: row.start_input_key_version,
+      plaintextSha256: row.start_input_sha256,
+      plaintextByteLength: row.start_input_length,
+    });
+    if (Buffer.byteLength(plaintext, 'utf8') !== row.start_input_length ||
+        createHash('sha256').update(plaintext).digest('hex') !== row.start_input_sha256) {
+      throw new Error('Refund start reservation integrity is invalid');
+    }
+    const input = JSON.parse(plaintext) as RefundStartInput;
+    if (input.workflowId !== row.workflow_id || input.access?.tenantId !== context.tenantId ||
+        input.access?.environmentId !== context.environmentId || input.access?.subjectCustomerId !== context.subjectCustomerId) {
+      throw new Error('Refund start reservation identity is invalid');
+    }
+    result.startInput = input;
+    return result;
+  }
+
   private async appendMessage(
     record: AppendMessageRecord,
     options: AppendMessageOptions,
@@ -356,9 +468,11 @@ export class PostgresConversationRepository
     return this.inTransaction(record.context, async (client) => {
       const conversation = await client.query<{
         subject_customer_id: string;
+        control_mode: 'AI' | 'QUEUED' | 'HUMAN';
+        control_version: string;
       }>(
         `
-          SELECT subject_customer_id
+          SELECT subject_customer_id, control_mode, control_version
           FROM conversation.conversations
           WHERE tenant_id = $1
             AND environment_id = $2
@@ -396,8 +510,22 @@ export class PostgresConversationRepository
           record.canonicalRequestHash,
         );
         const result = parseMessageResult(existingIdempotency.result_json);
+        if (options.senderKind === 'ASSISTANT' && result.refundStart) {
+          const reservation = await this.readRefundStartForMessage(client, record, result.messageId);
+          if (!reservation || reservation.workflowId !== result.refundStart.workflowId) throw new IdempotencyConflictError();
+          result.refundStart = reservation;
+        }
 
-        return { status: 'duplicate', ...result };
+        return { status: 'duplicate', ...result, controlMode: conversation.rows[0]?.control_mode, controlVersion: Number(conversation.rows[0]?.control_version) };
+      }
+
+      const controller = conversation.rows[0];
+      if (!controller) throw new ConversationUnavailableError();
+      const controlVersion = Number(controller.control_version);
+      if (options.senderKind === 'ASSISTANT') {
+        const assistantRecord = record as Parameters<ConversationRepository['appendAssistantMessage']>[0];
+        const expected = assistantRecord.expectedControlVersion ?? 1;
+        if (controller.control_mode !== 'AI' || !Number.isSafeInteger(controlVersion) || expected !== controlVersion) throw new HandoffConflictError();
       }
 
       const existingClientMessage = await client.query<{
@@ -435,6 +563,17 @@ export class PostgresConversationRepository
           messageId: existing.message_id,
           sequenceNumber: Number(existing.sequence_number),
         };
+        if (options.senderKind === 'ASSISTANT') {
+          const reservation = await this.readRefundStartForMessage(client, record, existing.message_id);
+          const assistantRecord = record as Parameters<ConversationRepository['appendAssistantMessage']>[0];
+          const requested = assistantRecord.refundWorkflowId;
+          if (reservation?.workflowId !== requested) throw new IdempotencyConflictError();
+          if (requested && (!reservation?.startInput || !assistantRecord.protectedRefundStartInput ||
+              createHash('sha256').update(JSON.stringify(reservation.startInput)).digest('hex') !== assistantRecord.protectedRefundStartInput.plaintextSha256)) {
+            throw new IdempotencyConflictError();
+          }
+          if (reservation) result.refundStart = reservation;
+        }
         await this.insertIdempotencyResult(
           client,
           record,
@@ -442,7 +581,7 @@ export class PostgresConversationRepository
           result,
         );
 
-        return { status: 'duplicate', ...result };
+        return { status: 'duplicate', ...result, controlMode: controller.control_mode, controlVersion };
       }
 
       const allocated = await client.query<{ sequence_number: string }>(
@@ -584,6 +723,16 @@ export class PostgresConversationRepository
         messageId: record.messageId,
         sequenceNumber,
       };
+      if (options.senderKind === 'ASSISTANT') {
+        const assistantRecord = record as Parameters<ConversationRepository['appendAssistantMessage']>[0];
+        const workflowId = assistantRecord.refundWorkflowId;
+        if (workflowId) {
+          const protectedInput = assistantRecord.protectedRefundStartInput;
+          if (!protectedInput || !assistantRecord.refundStartInput) throw new IdempotencyConflictError();
+          await client.query(`INSERT INTO conversation.refund_start_reservations(tenant_id,environment_id,conversation_id,workflow_id,assistant_message_id,accepted_control_version,status,created_at,updated_at,start_input_ciphertext,start_input_iv,start_input_tag,start_input_key_version,start_input_sha256,start_input_length) VALUES($1,$2,$3,$4,$5,$6,'PENDING',$7,$7,$8,$9,$10,$11,$12,$13)`, [record.context.tenantId, record.context.environmentId, record.conversationId, workflowId, record.messageId, controlVersion, record.occurredAt, protectedInput.ciphertext, protectedInput.initializationVector, protectedInput.authenticationTag, protectedInput.encryptionKeyVersion, protectedInput.plaintextSha256, protectedInput.plaintextByteLength]);
+          result.refundStart = { workflowId, status: 'PENDING' };
+        }
+      }
       await this.insertIdempotencyResult(
         client,
         record,
@@ -591,8 +740,16 @@ export class PostgresConversationRepository
         result,
       );
 
-      return { status: 'accepted', ...result };
+      const startInput = options.senderKind === 'ASSISTANT'
+        ? (record as Parameters<ConversationRepository['appendAssistantMessage']>[0]).refundStartInput
+        : undefined;
+      return { status: 'accepted', ...result, ...(startInput && result.refundStart ? { refundStart: { ...result.refundStart, startInput } } : {}), controlMode: controller.control_mode, controlVersion };
     });
+  }
+
+  private async readRefundStartForMessage(client: PoolClient, record: AppendMessageRecord, messageId: string): Promise<RefundStartReservation | undefined> {
+    const rows = await client.query<RefundStartRow>(`SELECT workflow_id,assistant_message_id,status,created_at,start_input_ciphertext,start_input_iv,start_input_tag,start_input_key_version,start_input_sha256,start_input_length FROM conversation.refund_start_reservations WHERE tenant_id=$1 AND environment_id=$2 AND conversation_id=$3 AND assistant_message_id=$4`, [record.context.tenantId, record.context.environmentId, record.conversationId, messageId]);
+    return rows.rows[0] ? this.toRefundStart(rows.rows[0], record.context) : undefined;
   }
 
   private async insertIdempotencyResult(
@@ -623,7 +780,7 @@ export class PostgresConversationRepository
         record.conversationId,
         record.idempotencyKey,
         record.canonicalRequestHash,
-        JSON.stringify(result),
+        JSON.stringify(result, (key, value) => key === 'startInput' ? undefined : value),
         record.occurredAt,
       ],
     );
@@ -754,9 +911,12 @@ function parseMessageResult(value: unknown): MessageResult {
     throw new Error('Stored message idempotency result is invalid');
   }
 
+  const reservation = 'refundStart' in value ? value.refundStart : undefined;
+  if (reservation !== undefined && (typeof reservation !== 'object' || reservation === null || !('workflowId' in reservation) || typeof reservation.workflowId !== 'string' || !('status' in reservation) || !['PENDING', 'STARTED', 'ABORTED'].includes(String(reservation.status)))) throw new Error('Stored refund start reservation is invalid');
   return {
     messageId: value.messageId,
     sequenceNumber: value.sequenceNumber,
+    ...(reservation === undefined ? {} : { refundStart: reservation as NonNullable<MessageResult['refundStart']> }),
   };
 }
 

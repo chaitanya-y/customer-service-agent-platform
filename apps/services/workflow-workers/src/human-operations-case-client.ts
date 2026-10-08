@@ -74,6 +74,7 @@ export function createHumanOperationsCaseClient({
     try {
       response = await fetchImpl(endpoint, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'content-type': 'application/json',
           'idempotency-key': input.idempotencyKey,

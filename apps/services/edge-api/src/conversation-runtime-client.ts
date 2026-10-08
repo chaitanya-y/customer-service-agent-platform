@@ -2,6 +2,7 @@ import {
   CONTEXT_ASSERTION_HEADER,
   SERVICE_ASSERTION_HEADER,
 } from './context-assertion.js';
+import type { RefundWorkflowStartInput } from './temporal-refund-client.js';
 
 export type ConversationRuntimeResponse = {
   statusCode: number;
@@ -18,6 +19,13 @@ export type GetConversation = (input: {
   contextAssertion: string;
 }) => Promise<ConversationRuntimeResponse>;
 
+export type RequestHumanHandoff = (input: {
+  conversationId: string;
+  contextAssertion: string;
+  idempotencyKey: string;
+  expectedControlVersion: number;
+}) => Promise<ConversationRuntimeResponse>;
+
 export type AcceptCustomerMessage = (input: {
   conversationId: string;
   contextAssertion: string;
@@ -32,6 +40,15 @@ export type AppendAssistantMessage = (input: {
   idempotencyKey: string;
   clientMessageId: string;
   text: string;
+  expectedControlVersion?: number;
+  refundWorkflowId?: string;
+  refundStartInput?: RefundWorkflowStartInput;
+}) => Promise<ConversationRuntimeResponse>;
+
+export type GetRefundStart = (input: {
+  conversationId: string;
+  assistantClientMessageId: string;
+  serviceAssertion: string;
 }) => Promise<ConversationRuntimeResponse>;
 
 export type LinkRefundWorkflow = (input: {
@@ -67,8 +84,10 @@ export function createConversationRuntimeClient({
 }: ConversationRuntimeClientOptions): {
   createConversation: CreateConversation;
   getConversation: GetConversation;
+  requestHumanHandoff: RequestHumanHandoff;
   acceptCustomerMessage: AcceptCustomerMessage;
   appendAssistantMessage: AppendAssistantMessage;
+  getRefundStart: GetRefundStart;
   linkRefundWorkflow: LinkRefundWorkflow;
 } {
   if (!Number.isInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
@@ -84,6 +103,7 @@ export function createConversationRuntimeClient({
     try {
       const response = await fetchImpl(endpoint, {
         ...init,
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMilliseconds),
       });
 
@@ -122,6 +142,20 @@ export function createConversationRuntimeClient({
         },
       ),
 
+    requestHumanHandoff: ({ conversationId, contextAssertion, idempotencyKey, expectedControlVersion }) =>
+      request(
+        new URL(`/v1/conversations/${encodeURIComponent(conversationId)}/handoff`, baseUrl),
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            [CONTEXT_ASSERTION_HEADER]: contextAssertion,
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({ expectedControlVersion }),
+        },
+      ),
+
     acceptCustomerMessage: ({
       conversationId,
       contextAssertion,
@@ -154,6 +188,9 @@ export function createConversationRuntimeClient({
       idempotencyKey,
       clientMessageId,
       text,
+      expectedControlVersion,
+      refundWorkflowId,
+      refundStartInput,
     }) =>
       request(
         new URL(
@@ -170,8 +207,17 @@ export function createConversationRuntimeClient({
           body: JSON.stringify({
             client_message_id: clientMessageId,
             content: { type: 'text', text },
+            ...(expectedControlVersion === undefined ? {} : { expected_control_version: expectedControlVersion }),
+            ...(refundWorkflowId === undefined ? {} : { refund_workflow_id: refundWorkflowId }),
+            ...(refundStartInput === undefined ? {} : { refund_start_input: refundStartInput }),
           }),
         },
+      ),
+
+    getRefundStart: ({ conversationId, assistantClientMessageId, serviceAssertion }) =>
+      request(
+        new URL(`/v1/internal/conversations/${encodeURIComponent(conversationId)}/refund-starts/by-assistant-client/${encodeURIComponent(assistantClientMessageId)}`, baseUrl),
+        { method: 'GET', headers: { [SERVICE_ASSERTION_HEADER]: serviceAssertion } },
       ),
 
     linkRefundWorkflow: ({

@@ -1,0 +1,7 @@
+{
+  "journey": "order_status",
+  "status": "answer_ready",
+  "customer_answer": {
+    "message": "Your order is processing."
+  }
+}

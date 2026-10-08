@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Pool, PoolClient } from 'pg';
+import type { RefundSelection } from './refund-context.js';
 
 export type RefundExecutionStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED' | 'PENDING_RECONCILIATION';
 export type RefundOperationsSnapshot = Readonly<{
@@ -10,7 +11,7 @@ export type RefundOperationsSnapshot = Readonly<{
   oldestPendingProviderEventAgeSeconds: number;
 }>;
 export type RefundExecution = Readonly<{ executionId: string; status: RefundExecutionStatus; providerRefundId?: string }>;
-export type ReserveRefundExecutionInput = Readonly<{ tenantId: string; environmentId: string; idempotencyKey: string; workflowId: string; previewId: string; orderId: string; amountMinor: number; currency: string; occurredAt: string }>;
+export type ReserveRefundExecutionInput = Readonly<{ tenantId: string; environmentId: string; idempotencyKey: string; workflowId: string; previewId: string; orderId: string; amountMinor: number; currency: string; selection: RefundSelection; reasonCode: string; occurredAt: string }>;
 export type ProviderRefundOutcome = 'COMPLETED' | 'FAILED';
 export type RecordProviderRefundEventInput = Readonly<{
   eventId: string;
@@ -27,7 +28,7 @@ export type PendingProviderRefundEvent = Readonly<{
 }>;
 
 export interface RefundExecutionRepository {
-  reserve(input: ReserveRefundExecutionInput): Promise<{ kind: 'reserved'; executionId: string } | { kind: 'existing'; execution: RefundExecution }>;
+  reserve(input: ReserveRefundExecutionInput): Promise<{ kind: 'reserved'; executionId: string } | { kind: 'existing'; execution: RefundExecution } | { kind: 'conflict' }>;
   recordOutcome(executionId: string, status: Exclude<RefundExecutionStatus, 'IN_PROGRESS'>, providerRefundId?: string): Promise<RefundExecution>;
   findSucceeded(tenantId: string, environmentId: string, orderId: string, amountMinor: number, currency: string): Promise<RefundExecution | undefined>;
   findByWorkflowAndPreview(tenantId: string, environmentId: string, workflowId: string, previewId: string): Promise<RefundExecution | undefined>;
@@ -38,6 +39,19 @@ export interface RefundExecutionRepository {
 }
 
 type Row = { execution_id: string; status: RefundExecutionStatus; provider_refund_id: string | null };
+type ReservationRow = Row & { idempotency_key: string; workflow_id: string; preview_id: string; order_id: string; amount_minor: string | number; currency: string; execution_intent_sha256: string | null };
+function executionIntentDigest(input: ReserveRefundExecutionInput): string {
+  // Item IDs are a set; persist an immutable, versioned digest rather than
+  // trusting a newly signed request to describe the historical execution.
+  return createHash('sha256').update(JSON.stringify(['refund-execution-intent-v1', input.orderId,
+    input.amountMinor, input.currency, input.selection.scope, [...input.selection.itemIds].sort(), input.reasonCode])).digest('hex');
+}
+function sameReservation(row: ReservationRow, input: ReserveRefundExecutionInput): boolean {
+  return row.idempotency_key === input.idempotencyKey && row.workflow_id === input.workflowId
+    && row.preview_id === input.previewId && row.order_id === input.orderId
+    && Number(row.amount_minor) === input.amountMinor && row.currency === input.currency
+    && typeof row.execution_intent_sha256 === 'string' && row.execution_intent_sha256 === executionIntentDigest(input);
+}
 function toExecution(row: Row): RefundExecution { return row.provider_refund_id === null ? { executionId: row.execution_id, status: row.status } : { executionId: row.execution_id, status: row.status, providerRefundId: row.provider_refund_id }; }
 const activeRefundExecutionStatuses = ['IN_PROGRESS', 'SUBMITTED', 'PENDING_RECONCILIATION'] as const;
 
@@ -68,15 +82,23 @@ export class PostgresRefundExecutionRepository implements RefundExecutionReposit
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const inserted = await client.query<Row>(`INSERT INTO refund.executions (execution_id, tenant_id, environment_id, idempotency_key, workflow_id, preview_id, order_id, amount_minor, currency, status, created_at, updated_at, status_entered_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'IN_PROGRESS',$10,$10,$10) ON CONFLICT (tenant_id, environment_id, idempotency_key) DO NOTHING RETURNING execution_id, status, provider_refund_id`, [executionId, input.tenantId, input.environmentId, input.idempotencyKey, input.workflowId, input.previewId, input.orderId, input.amountMinor, input.currency, input.occurredAt]);
+      const inserted = await client.query<Row>(`INSERT INTO refund.executions (execution_id, tenant_id, environment_id, idempotency_key, workflow_id, preview_id, order_id, amount_minor, currency, status, created_at, updated_at, status_entered_at, execution_intent_sha256) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'IN_PROGRESS',$10,$10,$10,$11) ON CONFLICT DO NOTHING RETURNING execution_id, status, provider_refund_id`, [executionId, input.tenantId, input.environmentId, input.idempotencyKey, input.workflowId, input.previewId, input.orderId, input.amountMinor, input.currency, input.occurredAt, executionIntentDigest(input)]);
       if (inserted.rowCount === 1) {
+        // Commit this durable order fence with the execution, before any HTTP
+        // dispatch. Unlike a lock/lease, no status or process crash releases it.
+        const claim = await client.query(`INSERT INTO refund.order_claims (tenant_id, environment_id, order_id, execution_id, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING order_id`, [input.tenantId, input.environmentId, input.orderId, executionId, input.occurredAt]);
+        if (claim.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          return { kind: 'conflict' as const };
+        }
         await this.insertAudit(client, executionId, 'refund_execution_requested', { workflowId: input.workflowId, previewId: input.previewId, amountMinor: input.amountMinor, currency: input.currency });
         await client.query('COMMIT');
         return { kind: 'reserved' as const, executionId };
       }
-      const existing = await client.query<Row>(`SELECT execution_id, status, provider_refund_id FROM refund.executions WHERE tenant_id = $1 AND environment_id = $2 AND idempotency_key = $3`, [input.tenantId, input.environmentId, input.idempotencyKey]);
-      if (existing.rowCount !== 1 || !existing.rows[0]) throw new Error('REFUND_EXECUTION_RESERVATION_FAILED');
+      const existing = await client.query<ReservationRow>(`SELECT execution_id, status, provider_refund_id, idempotency_key, workflow_id, preview_id, order_id, amount_minor, currency, execution_intent_sha256 FROM refund.executions WHERE tenant_id = $1 AND environment_id = $2 AND (idempotency_key = $3 OR (workflow_id = $4 AND preview_id = $5))`, [input.tenantId, input.environmentId, input.idempotencyKey, input.workflowId, input.previewId]);
+      if (existing.rowCount === 0 || !existing.rows[0]) throw new Error('REFUND_EXECUTION_RESERVATION_FAILED');
       await client.query('COMMIT');
+      if (existing.rowCount !== 1 || !sameReservation(existing.rows[0], input)) return { kind: 'conflict' as const };
       return { kind: 'existing' as const, execution: toExecution(existing.rows[0]) };
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
@@ -189,14 +211,19 @@ export class PostgresRefundExecutionRepository implements RefundExecutionReposit
 
 /** Keeps isolated route tests fast. The production server always supplies Postgres. */
 export class InMemoryRefundExecutionRepository implements RefundExecutionRepository {
-  private readonly executions = new Map<string, { executionId: string; status: RefundExecutionStatus; statusEnteredAt: Date; providerRefundId?: string; key: string; workflowId: string; previewId: string; tenantId: string; environmentId: string; orderId: string; amountMinor: number; currency: string }>();
+  private readonly executions = new Map<string, { executionId: string; status: RefundExecutionStatus; statusEnteredAt: Date; providerRefundId?: string; key: string; workflowId: string; previewId: string; tenantId: string; environmentId: string; orderId: string; amountMinor: number; currency: string; intentSha256: string }>();
   private readonly providerEvents = new Map<string, PendingProviderRefundEvent>();
   constructor(private readonly clock: () => Date = () => new Date()) {}
   async reserve(input: ReserveRefundExecutionInput) {
-    const key = `${input.tenantId}:${input.environmentId}:${input.idempotencyKey}`;
-    const existing = this.executions.get(key);
-    if (existing) return { kind: 'existing' as const, execution: this.public(existing) };
-    const execution = { executionId: randomUUID(), status: 'IN_PROGRESS' as const, statusEnteredAt: new Date(input.occurredAt), key, workflowId: input.workflowId, previewId: input.previewId, tenantId: input.tenantId, environmentId: input.environmentId, orderId: input.orderId, amountMinor: input.amountMinor, currency: input.currency };
+    const key = JSON.stringify([input.tenantId, input.environmentId, input.idempotencyKey]);
+    const intentSha256 = executionIntentDigest(input);
+    const existing = [...this.executions.values()].filter((item) => item.tenantId === input.tenantId && item.environmentId === input.environmentId && (item.key === key || item.orderId === input.orderId || (item.workflowId === input.workflowId && item.previewId === input.previewId)));
+    if (existing.length > 0) {
+      const execution = existing[0]!;
+      if (existing.length !== 1 || execution.key !== key || execution.workflowId !== input.workflowId || execution.previewId !== input.previewId || execution.orderId !== input.orderId || execution.amountMinor !== input.amountMinor || execution.currency !== input.currency || execution.intentSha256 !== intentSha256) return { kind: 'conflict' as const };
+      return { kind: 'existing' as const, execution: this.public(execution) };
+    }
+    const execution = { executionId: randomUUID(), status: 'IN_PROGRESS' as const, statusEnteredAt: new Date(input.occurredAt), key, workflowId: input.workflowId, previewId: input.previewId, tenantId: input.tenantId, environmentId: input.environmentId, orderId: input.orderId, amountMinor: input.amountMinor, currency: input.currency, intentSha256 };
     this.executions.set(key, execution); return { kind: 'reserved' as const, executionId: execution.executionId };
   }
   async recordOutcome(executionId: string, status: Exclude<RefundExecutionStatus, 'IN_PROGRESS'>, providerRefundId?: string) {

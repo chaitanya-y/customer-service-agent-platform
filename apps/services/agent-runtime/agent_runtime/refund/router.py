@@ -25,6 +25,7 @@ from agent_runtime.integrations.trusted_context import (
     AgentRuntimeContextAssertionError,
     AgentRuntimeContextVerifier,
     HmacAgentRuntimeContextVerifier,
+    VerifiedAgentRuntimeContext,
 )
 from agent_runtime.observability import telemetry_runtime
 from agent_runtime.refund.answer import RefundAnswerComposer
@@ -65,6 +66,65 @@ def get_agent_runtime_context_verifier() -> AgentRuntimeContextVerifier:
         expected_tenant_id=settings.tenant_id,
         expected_environment_id=settings.environment_id,
     )
+
+
+async def run_refund_intake(
+    request: RefundIntakeRequest,
+    *,
+    trusted_context: VerifiedAgentRuntimeContext,
+    context_assertion: str,
+    knowledge_rag_context_assertion: str,
+    intent_extractor: RefundIntentExtractor,
+    proposal_builder: RefundProposalBuilder,
+    answer_composer: RefundAnswerComposer,
+) -> RefundIntakeResponse:
+    """Run the existing graph in-process for either authenticated entry point."""
+
+    knowledge_rag_settings = KnowledgeRagClientSettings()
+    graph = build_refund_graph(
+        McpOrderLookupClient(context_assertion=context_assertion),
+        intent_extractor,
+        proposal_builder,
+        KnowledgeRagCustomerEvidenceClient(
+            context_assertion=knowledge_rag_context_assertion,
+            base_url=knowledge_rag_settings.knowledge_rag_base_url,
+            timeout_seconds=knowledge_rag_settings.knowledge_rag_timeout_seconds,
+        ),
+        answer_composer,
+        telemetry=telemetry_runtime,
+    )
+
+    try:
+        result = await graph.ainvoke(
+            {
+                **request.model_dump(),
+                "tenant_id": trusted_context.tenant_id,
+                "environment_id": trusted_context.environment_id,
+                "context_id": trusted_context.context_id,
+                "request_id": trusted_context.request_id,
+                "turn_id": str(uuid4()),
+                "trace_id": trusted_context.trace_id,
+                "refund_policy": trusted_context.refund_policy,
+            }
+        )
+    except OrderLookupUnauthorizedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": error.code,
+                "message": str(error),
+            },
+        ) from error
+    except CustomerEvidenceLookupUnauthorizedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "context_unauthorized",
+                "message": "Trusted context is required",
+            },
+        ) from error
+
+    return RefundIntakeResponse.model_validate(result)
 
 
 @router.post(
@@ -128,48 +188,12 @@ async def intake_refund(
             },
         ) from error
 
-    knowledge_rag_settings = KnowledgeRagClientSettings()
-    graph = build_refund_graph(
-        McpOrderLookupClient(context_assertion=context_assertion),
-        intent_extractor,
-        proposal_builder,
-        KnowledgeRagCustomerEvidenceClient(
-            context_assertion=knowledge_rag_context_assertion,
-            base_url=knowledge_rag_settings.knowledge_rag_base_url,
-            timeout_seconds=knowledge_rag_settings.knowledge_rag_timeout_seconds,
-        ),
-        answer_composer,
-        telemetry=telemetry_runtime,
+    return await run_refund_intake(
+        request,
+        trusted_context=trusted_context,
+        context_assertion=context_assertion,
+        knowledge_rag_context_assertion=knowledge_rag_context_assertion,
+        intent_extractor=intent_extractor,
+        proposal_builder=proposal_builder,
+        answer_composer=answer_composer,
     )
-
-    try:
-        result = await graph.ainvoke(
-            {
-                **request.model_dump(),
-                "tenant_id": trusted_context.tenant_id,
-                "environment_id": trusted_context.environment_id,
-                "context_id": trusted_context.context_id,
-                "request_id": trusted_context.request_id,
-                "turn_id": str(uuid4()),
-                "trace_id": trusted_context.trace_id,
-                "refund_policy": trusted_context.refund_policy,
-            }
-        )
-    except OrderLookupUnauthorizedError as error:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": error.code,
-                "message": str(error),
-            },
-        ) from error
-    except CustomerEvidenceLookupUnauthorizedError as error:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "context_unauthorized",
-                "message": "Trusted context is required",
-            },
-        ) from error
-
-    return RefundIntakeResponse.model_validate(result)

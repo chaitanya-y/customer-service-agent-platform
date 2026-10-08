@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/product-catalog/v1",
+  "title": "ProductCatalogV1",
+  "description": "Public, tenant- and channel-scoped product catalog projection for read-only support.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "matches"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "matches": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/productMatch" } }
+  },
+  "$defs": {
+    "productMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "variants"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 4000 },
+        "variants": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/productVariant" } },
+        "availability": { "enum": ["IN_STOCK", "OUT_OF_STOCK"] }
+      }
+    },
+    "productVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "availability": {
+          "description": "Provider catalog-index stock status for this variant. Not a reservation, live inventory count, or fulfillment guarantee.",
+          "enum": ["IN_STOCK", "OUT_OF_STOCK"]
+        },
+        "price": { "$ref": "#/$defs/money" }
+      }
+    },
+    "money": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amountMinor", "currency"],
+      "properties": {
+        "amountMinor": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    }
+  }
+}

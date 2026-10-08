@@ -23,6 +23,8 @@ export type CommerceOrder = {
     sku: string;
     name: string;
     quantity: number;
+    // Historical quantity for display only; quantity remains the current commerce quantity.
+    orderedQuantity?: number;
     unitPrice: Money;
     lineTotal: Money;
   }>;
@@ -51,6 +53,7 @@ export interface CommerceProvider {
   getOrderByReference(reference: string): Promise<CommerceOrder | null>;
   getOrderById(orderId: string): Promise<CommerceOrder | null>;
   executeRefund?(input: {
+    orderId: string;
     paymentId: string;
     amount: Money;
     reason: string;

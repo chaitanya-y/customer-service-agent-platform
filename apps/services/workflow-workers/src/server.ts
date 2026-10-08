@@ -10,6 +10,8 @@ import { REFUND_POLICY_V1, getRefundPolicyRelease } from './refund-policy-releas
 import { createRefundEvidenceClient } from './refund-evidence-client.js';
 import { runRefundWorker } from './refund-worker.js';
 import { createHmacWorkflowAccessAssertionSigner } from './workflow-access-assertion.js';
+import { createIntegrationGatewayZeroTotalCancellationClient } from './zero-total-cancellation-client.js';
+import { createIntegrationGatewayAuthorizedDummyCancellationClient } from './authorized-dummy-cancellation-client.js';
 
 const config = loadConfig();
 const telemetry = initializeTelemetry({ serviceName: 'workflow-workers' });
@@ -59,11 +61,23 @@ const activities = createRefundWorkflowActivities({
   }),
   telemetry,
 });
+const cancellationActivities = createIntegrationGatewayZeroTotalCancellationClient({
+  baseUrl: config.INTEGRATION_GATEWAY_BASE_URL,
+  signWorkflowAccessAssertion,
+  expectedTenantId: config.TENANT_ID,
+  expectedEnvironmentId: config.ENVIRONMENT_ID,
+});
+const authorizedDummyCancellationActivities = createIntegrationGatewayAuthorizedDummyCancellationClient({
+  baseUrl: config.INTEGRATION_GATEWAY_BASE_URL,
+  signWorkflowAccessAssertion,
+  expectedTenantId: config.TENANT_ID,
+  expectedEnvironmentId: config.ENVIRONMENT_ID,
+});
 
 try {
   await runRefundWorker({
     taskQueue: config.TEMPORAL_TASK_QUEUE,
-    activities,
+    activities: { ...activities, ...cancellationActivities, ...authorizedDummyCancellationActivities },
     temporalAddress: config.TEMPORAL_ADDRESS,
   });
 } finally {

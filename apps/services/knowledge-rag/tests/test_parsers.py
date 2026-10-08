@@ -1,6 +1,9 @@
 import hashlib
 from pathlib import Path
 
+import pytest
+from docx import Document
+
 from knowledge_rag.models import SourceContentType
 from knowledge_rag.parsers import parse_source
 
@@ -23,9 +26,10 @@ def test_parses_refund_policy_markdown_into_citable_sections() -> None:
 
     assert document.source_content_type == SourceContentType.MARKDOWN
     assert document.title == "Acme Refund Policy"
-    assert document.source_content_sha256 == hashlib.sha256(
-        source_path.read_bytes()
-    ).hexdigest()
+    assert (
+        document.source_content_sha256
+        == hashlib.sha256(source_path.read_bytes()).hexdigest()
+    )
 
     damaged_items = next(
         section
@@ -60,6 +64,7 @@ def test_parses_html_and_preserves_refund_review_content() -> None:
     assert "USD 500.00" in refund_review.text
     assert "human takeover" in refund_review.text
 
+
 def test_parses_docx_and_records_its_page_location_limit() -> None:
     source_path = FIXTURE_DIRECTORY / "refund-policy-2026-08-01.docx"
 
@@ -85,6 +90,20 @@ def test_parses_docx_and_records_its_page_location_limit() -> None:
         warning.code == "DOCX_PAGE_LOCATIONS_UNAVAILABLE"
         for warning in document.extraction_warnings
     )
+
+
+def test_rejects_docx_with_table_instead_of_indexing_partial_text(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "policy-with-table.docx"
+    source = Document()
+    source.add_paragraph("Paragraph text alone is incomplete policy evidence.")
+    table = source.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "Critical policy condition"
+    source.save(source_path)
+
+    with pytest.raises(ValueError, match="DOCX tables are not supported"):
+        parse_source(source_path)
 
 
 def test_parses_plain_text_as_one_introduction_section(tmp_path: Path) -> None:
@@ -124,6 +143,5 @@ def test_parses_pdf_with_page_accurate_evidence() -> None:
         for warning in document.extraction_warnings
     )
     assert not any(
-        warning.code == "PDF_PAGE_EMPTY"
-        for warning in document.extraction_warnings
+        warning.code == "PDF_PAGE_EMPTY" for warning in document.extraction_warnings
     )

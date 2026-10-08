@@ -16,13 +16,16 @@
     "start": "vendure start all"
   },
   "dependencies": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/graphql": "13.1.0",
     "@vendure/asset-server-plugin": "3.7.1",
     "@vendure/core": "3.7.1",
     "@vendure/dashboard": "3.7.1",
     "@vendure/email-plugin": "3.7.1",
     "@vendure/graphiql-plugin": "3.7.1",
     "better-sqlite3": "13.0.1",
-    "dotenv": "17.4.2"
+    "dotenv": "17.4.2",
+    "graphql-tag": "2.12.6"
   },
   "devDependencies": {
     "@vendure/cli": "3.7.1",

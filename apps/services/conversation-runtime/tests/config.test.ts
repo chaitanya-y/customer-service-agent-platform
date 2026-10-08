@@ -35,3 +35,11 @@ test('accepts only an exact 32-byte base64 message key', () => {
     /exactly 32 bytes/,
   );
 });
+
+test('generic staff assertions require a separate non-reused signing key', () => {
+  const secret = 'conversation-staff-secret-with-at-least-32-bytes';
+  assert.equal(loadConfig({ ...BASE_ENV, CONVERSATION_STAFF_ASSERTION_HMAC_SECRET: secret }).CONVERSATION_STAFF_ASSERTION_HMAC_SECRET, secret);
+  for (const reused of [BASE_ENV.CONTEXT_ASSERTION_HMAC_SECRET, BASE_ENV.EDGE_SERVICE_ASSERTION_HMAC_SECRET, BASE_ENV.MESSAGE_ENCRYPTION_KEY_BASE64, 'short']) {
+    assert.throws(() => loadConfig({ ...BASE_ENV, CONVERSATION_STAFF_ASSERTION_HMAC_SECRET: reused }));
+  }
+});

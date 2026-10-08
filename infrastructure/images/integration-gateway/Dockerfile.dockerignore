@@ -1,0 +1,29 @@
+# Defense in depth for direct repository-root BuildKit builds. The local proof
+# stages an explicit context because legacy builders may ignore this file.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/services/
+!apps/services/integration-gateway/
+!apps/services/integration-gateway/package.json
+!apps/services/integration-gateway/tsconfig.json
+!apps/services/integration-gateway/src/
+!apps/services/integration-gateway/src/**/*.ts
+!packages/
+!packages/observability-node/
+!packages/observability-node/package.json
+!packages/observability-node/index.mjs
+!packages/observability-node/index.d.mts
+**/.env
+**/.env.*
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519

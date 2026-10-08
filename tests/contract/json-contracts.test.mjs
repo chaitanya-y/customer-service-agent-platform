@@ -29,6 +29,10 @@ const contracts = {
     "contracts/customer-api/refund-evidence/v1/refund-evidence-summary.schema.json",
   refundEvidenceReviewCommand:
     "contracts/human-api/refund-evidence/v1/refund-evidence-review-command.schema.json",
+  supportIntake:
+    "contracts/ai-io/support-intake/v1/support-intake-response.schema.json",
+  productCatalog:
+    "contracts/tools/product-catalog/v1/product-catalog.schema.json",
 };
 
 const fixtures = {
@@ -41,6 +45,8 @@ const fixtures = {
   policyDecision: "policy-decision",
   refundEvidenceSummary: "refund-evidence-summary",
   refundEvidenceReviewCommand: "refund-evidence-review-command",
+  supportIntake: "support-intake",
+  productCatalog: "product-catalog",
 };
 
 async function readJson(relativePath) {
@@ -133,6 +139,85 @@ test("context assertion accepts only a well-formed optional refund policy bindin
   );
 });
 
+test("supportIntake rejects a proposal on a read-only journey", async () => {
+  const validate = ajv.getSchema(pathToSchemaId(contracts.supportIntake));
+
+  assert.equal(
+    validate({
+      journey: "order_status",
+      status: "answer_ready",
+      customer_answer: { message: "Your order is processing." },
+      refund_proposal: { proposalId: "forged-proposal" },
+    }),
+    false,
+  );
+});
+
+test("supportIntake accepts only a minimal owned-order items answer", () => {
+  const validate = ajv.getSchema(pathToSchemaId(contracts.supportIntake));
+  const answer = {
+    journey: "order_items",
+    status: "answer_ready",
+    customer_answer: { message: "Order ORDER-123 contains Laptop (quantity 2)." },
+  };
+
+  assert.equal(validate(answer), true, ajv.errorsText(validate.errors));
+  assert.equal(validate({ ...answer, refund_proposal: { proposalId: "forged" } }), false);
+  assert.equal(validate({ ...answer, status: "awaiting_product" }), false);
+});
+
+test("supportIntake requires a proposal for a ready refund", () => {
+  const validate = ajv.getSchema(pathToSchemaId(contracts.supportIntake));
+
+  assert.equal(
+    validate({
+      journey: "refund",
+      status: "refund_proposal_ready",
+      customer_message: "I need a refund.",
+      order_reference: "3",
+    }),
+    false,
+  );
+});
+
+test("supportIntake accepts a legacy refund proposal before it is ready", async () => {
+  const validate = ajv.getSchema(pathToSchemaId(contracts.supportIntake));
+  const refundProposal = await readJson(
+    "tests/contract/fixtures/refund-proposal/valid.json",
+  );
+
+  assert.equal(
+    validate({
+      journey: "refund",
+      status: "awaiting_refund_details",
+      customer_message: "I need a refund.",
+      order_reference: "3",
+      refund_proposal: refundProposal,
+    }),
+    true,
+    ajv.errorsText(validate.errors),
+  );
+});
+
+test("productCatalog rejects excess and internal data", async () => {
+  const validate = ajv.getSchema(pathToSchemaId(contracts.productCatalog));
+  const valid = await readJson(
+    `tests/contract/fixtures/${fixtures.productCatalog}/valid.json`,
+  );
+
+  assert.equal(
+    validate({ ...valid, matches: Array.from({ length: 6 }, () => valid.matches[0]) }),
+    false,
+  );
+  assert.equal(
+    validate({
+      ...valid,
+      matches: [{ ...valid.matches[0], sourceId: "vendure-123" }],
+    }),
+    false,
+  );
+});
+
 function pathToSchemaId(schemaPath) {
   const ids = {
     [contracts.contextAssertion]:
@@ -153,6 +238,10 @@ function pathToSchemaId(schemaPath) {
       "https://customer-service-os.example/contracts/customer-api/refund-evidence/v1/summary",
     [contracts.refundEvidenceReviewCommand]:
       "https://customer-service-os.example/contracts/human-api/refund-evidence/v1/review-command",
+    [contracts.supportIntake]:
+      "https://customer-service-os.example/contracts/ai-io/support-intake/v1",
+    [contracts.productCatalog]:
+      "https://customer-service-os.example/contracts/tools/product-catalog/v1",
   };
 
   return ids[schemaPath];

@@ -138,6 +138,7 @@ export function RefundJourney({ workflowId }: { workflowId: string }) {
         <h1 id="refund-status-heading">{journey.statusLabel}</h1>
         <p className={styles.journeyDetail}>{journey.statusDetail}</p>
         {journey.nextActionLabel ? <p className={styles.nextAction}>{journey.nextActionLabel}</p> : null}
+        {journey.nextAction === "CONTACT_SUPPORT" ? <a className="cso-primary-button" href="/support">Contact support</a> : null}
         <p aria-live="polite" className={styles.updateConnection}>
           {updateConnectionLabel(updateConnection)}
         </p>

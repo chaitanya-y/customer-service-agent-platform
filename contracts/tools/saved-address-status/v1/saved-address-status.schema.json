@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/saved-address-status/v1",
+  "title": "SavedAddressStatusV1",
+  "description": "Read-only address-book counts and defaults for the verified customer. No address contents or order-delivery inference.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "savedAddressCount", "hasDefaultShippingAddress", "hasDefaultBillingAddress"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "savedAddressCount": { "type": "integer", "minimum": 0, "maximum": 1000 },
+    "hasDefaultShippingAddress": { "type": "boolean" },
+    "hasDefaultBillingAddress": { "type": "boolean" }
+  },
+  "if": { "properties": { "savedAddressCount": { "const": 0 } } },
+  "then": {
+    "properties": {
+      "hasDefaultShippingAddress": { "const": false },
+      "hasDefaultBillingAddress": { "const": false }
+    }
+  }
+}

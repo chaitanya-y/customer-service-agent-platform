@@ -23,6 +23,7 @@ from agent_runtime.refund.answer import (
 )
 from agent_runtime.refund.intent import RefundIntentExtraction, RefundReasonCode
 from agent_runtime.refund.policy import VerifiedRefundPolicy
+from agent_runtime.refund.presentation import REFUND_ANSWER_PRESENTATION_VERSION
 from agent_runtime.refund.proposal import RefundProposalBuilder
 from knowledge_rag.embeddings import EmbeddingModel
 from knowledge_rag.evaluation import EvidenceReference
@@ -291,6 +292,7 @@ def _build_versions(
         "application_facts": "synthetic-refund-facts-v1",
         "answer_model": answer_model,
         "answer_prompt": REFUND_ANSWER_PROMPT_VERSION,
+        "answer_presentation": REFUND_ANSWER_PRESENTATION_VERSION,
         "embedding_model": _embedding_model_version(result.embedding_model),
         "knowledge_release": request.knowledge_release_id,
         "reranker_model": _reranker_model_version(result),

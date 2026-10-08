@@ -35,6 +35,7 @@ from agent_runtime.refund.graph import (
     MISSING_ORDER_REFERENCE_MESSAGE,
     build_refund_graph,
     create_compose_customer_answer_node,
+    create_lookup_order_node,
 )
 from agent_runtime.refund.intent import (
     RefundIntentExtraction,
@@ -68,6 +69,19 @@ class FakeOrderLookup:
             raise AssertionError("A fake result or error is required")
 
         return self.result
+
+
+@pytest.mark.asyncio
+async def test_refund_lookup_node_rejects_mismatched_order_facts(
+    order_context: OrderContext,
+) -> None:
+    lookup = FakeOrderLookup(
+        result=order_context.model_copy(update={"reference": "ORDER-OTHER"})
+    )
+    result = await create_lookup_order_node(lookup)({"order_reference": "ORDER-123"})
+    assert result["status"] == "order_lookup_unavailable"
+    assert result["error_code"] == "invalid_order_context"
+    assert result["order_context"] is None
 
 
 class FakeRefundIntentExtractor:

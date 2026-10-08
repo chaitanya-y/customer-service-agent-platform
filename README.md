@@ -207,6 +207,9 @@ saved-address answers. A separate delivery-issue flow records reports and
 administrative review closure; staffed chat handoff and narrow zero-total
 cancellation have their own boundaries. Paid-order cancellation, physical
 returns/exchanges, replacement, and wider account changes remain planned.
+An authorized dummy-payment cancellation experiment exists behind separate
+provider and policy guards, but it is not customer-enabled and is not a
+general paid-order cancellation journey.
 The table below describes the intended portfolio, not a claim that every row
 is operational.
 
@@ -361,7 +364,8 @@ The shared support chat now answers narrowly worded recent-order questions
 through the same owner-checked source; it lists references only, not order
 status or a complete account history.
 
-For precise test evidence and boundaries, see
+For the October 8 precommit checks, see [Codex Handoff](docs/CODEX_HANDOFF.md).
+For detailed journey evidence and remaining boundaries, see
 [Verification Status](docs/VERIFICATION_STATUS.md).
 
 ## Explore the project

@@ -9,6 +9,8 @@ import { WORKFLOW_ASSERTION_HEADER, type VerifyWorkflowCaseAccess } from './work
 import { evidenceCaseFields, registerEvidenceRoutes, type EvidenceRoutesOptions } from './refund-evidence-routes.js';
 import { EvidenceError } from './refund-evidence.js';
 import { instrumentHttpServer } from './observability.js';
+import { registerDeliveryIssueRoutes, type DeliveryIssueRoutesOptions } from './delivery-issue-routes.js';
+import { registerSupportChatRoutes, type SupportChatRoutesOptions } from './conversation-handoff-routes.js';
 
 const opaqueId = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const workflowParamsSchema = z.object({ workflowId: opaqueId });
@@ -45,6 +47,8 @@ type AppOptions = Readonly<{
   repository?: HumanCaseRepository;
   verifyWorkflowCaseAccess?: VerifyWorkflowCaseAccess;
   evidence?: EvidenceRoutesOptions;
+  delivery?: DeliveryIssueRoutesOptions;
+  support?: SupportChatRoutesOptions;
   telemetry?: RequestInstrumentation;
 }>;
 
@@ -57,6 +61,8 @@ export function buildApp(options: AppOptions) {
     ...(options.evidence ? await evidenceCaseFields(options.evidence,humanCase,access) : {}),
   });
   if (options.evidence) registerEvidenceRoutes(app, options.evidence, { cases: repository, verifyHuman: options.verifyHuman, verifyWorkflow: options.verifyWorkflowCaseAccess, caseResponse });
+  if (options.delivery) registerDeliveryIssueRoutes(app, options.delivery);
+  if (options.support) registerSupportChatRoutes(app, options.support);
   app.get('/health', async () => ({ service: 'human-operations', status: 'ok' }));
 
   app.post('/internal/v1/refund-cases', async (request, reply) => {

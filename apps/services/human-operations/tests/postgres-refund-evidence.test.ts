@@ -84,7 +84,9 @@ test('transactional photo lifecycle: ownership, raw validation, revisions, immut
   const transitioned=await app.inject({method:'POST',url:transitionUrl,headers:workerHeaders,payload:transitionBody});assert.equal(transitioned.statusCode,200,transitioned.body);assert.equal(transitioned.json().refund_case.case_id,caseId);assert.equal(transitioned.json().refund_case.status,'OPEN');assert.equal(transitioned.json().refund_case.assigned_staff_id,undefined);
   const audits=await cases.auditEvents({...scope,caseId});assert.ok(audits.some(event=>event.eventType==='EVIDENCE_REVIEWED'));assert.ok(audits.some(event=>event.eventType==='CASE_PHASE_CHANGED'));
   await cases.close({...scope,caseId,workflowId});
-  const removed:string[]=[];now=new Date(now.getTime()+31*86400000);
+  // Case closure uses the repository's real clock, while evidence uploads above
+  // use the fixed test clock. Advance past the later timestamp for retention.
+  const removed:string[]=[];now=new Date(Math.max(now.getTime(),Date.now())+31*86400000);
   await repository.purge(scope,{retentionDays:30,now,remove:async key=>{removed.push(key);await store.remove(key);}});
   assert.equal(evidenceSnapshot(await repository.get(scope,workflowId)).evidence.assessment,'UNREVIEWED');
   assert.equal(evidenceSnapshot(await repository.get(scope,workflowId)).accepted_manifest_hash,snapshot.accepted_manifest_hash);

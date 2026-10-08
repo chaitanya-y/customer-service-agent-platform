@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from agent_runtime.observability import telemetry_runtime as default_telemetry_runtime
 from agent_runtime.refund.router import router as refund_router
+from agent_runtime.support.router import router as support_router
 
 
 def create_app(
@@ -22,6 +23,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.include_router(refund_router)
+    application.include_router(support_router)
 
     @application.get("/health")
     async def health() -> dict[str, str]:

@@ -1,0 +1,29 @@
+# Defense in depth for direct repository-root BuildKit builds. The local proof
+# uses an explicit staged context because legacy builders may ignore this file.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/services/
+!apps/services/conversation-runtime/
+!apps/services/conversation-runtime/package.json
+!apps/services/conversation-runtime/tsconfig.json
+!apps/services/conversation-runtime/src/
+!apps/services/conversation-runtime/src/**/*.ts
+!packages/
+!packages/observability-node/
+!packages/observability-node/package.json
+!packages/observability-node/index.mjs
+!packages/observability-node/index.d.mts
+**/.env
+**/.env.*
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519

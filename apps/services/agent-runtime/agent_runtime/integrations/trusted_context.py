@@ -103,6 +103,9 @@ class VerifiedAgentRuntimeContext(BaseModel):
     subject_customer_id: str = Field(min_length=1)
     request_id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
+    channel_id: str = Field(min_length=1)
+    home_region: str = Field(min_length=1)
+    home_cell: str = Field(min_length=1)
     routing_epoch: int = Field(ge=1)
     refund_policy: VerifiedRefundPolicy | None = None
 
@@ -180,6 +183,9 @@ class HmacAgentRuntimeContextVerifier:
                 subject_customer_id=claims.subject.customer_id,
                 request_id=claims.request.request_id,
                 trace_id=claims.request.trace_id,
+                channel_id=claims.request.channel_id,
+                home_region=claims.route.home_region,
+                home_cell=claims.route.home_cell,
                 routing_epoch=claims.route.routing_epoch,
                 refund_policy=refund_policy,
             )

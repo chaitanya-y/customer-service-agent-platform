@@ -39,6 +39,7 @@ _OPERATION_NAMES = frozenset(
         "answer.fallback",
         "knowledge.retrieve",
         "mcp.lookup_order",
+        "mcp.lookup_recent_order_references",
         "model.refund_answer",
         "model.refund_intent",
         "rag.fusion",
