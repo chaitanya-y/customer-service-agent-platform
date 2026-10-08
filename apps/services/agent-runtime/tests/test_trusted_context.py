@@ -90,6 +90,9 @@ def test_verifies_an_assertion_intended_for_agent_runtime() -> None:
         "subject_customer_id": "customer-42",
         "request_id": "request-1",
         "trace_id": "trace-1",
+        "channel_id": "web",
+        "home_region": "local",
+        "home_cell": "local-cell-1",
         "routing_epoch": 1,
         "refund_policy": None,
     }

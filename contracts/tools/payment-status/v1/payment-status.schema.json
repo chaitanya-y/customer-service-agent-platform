@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/payment-status/v1",
+  "title": "PaymentStatusV1",
+  "description": "Minimal payment and refund state for an order owned by the verified customer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "reference", "paymentStatus", "refundStatus"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "reference": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "paymentStatus": {
+      "enum": ["PAID", "PARTIALLY_PAID", "AUTHORIZED", "DECLINED", "NOT_RECORDED", "UNCERTAIN"]
+    },
+    "refundStatus": {
+      "enum": ["NONE", "PENDING", "PARTIALLY_REFUNDED", "PARTIALLY_REFUNDED_WITH_PENDING", "REFUNDED", "FAILED", "UNCERTAIN"]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/recent-order-references/v1",
+  "title": "RecentOrderReferencesV1",
+  "description": "Up to ten latest placed order references for the verified customer. Runtime additionally enforces unique references and descending placement dates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orders", "hasMore"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "orders": {
+      "type": "array", "maxItems": 10, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["reference", "placedAt"],
+        "properties": {
+          "reference": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "placedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "hasMore": { "type": "boolean" }
+  },
+  "if": { "properties": { "hasMore": { "const": true } } },
+  "then": { "properties": { "orders": { "type": "array", "minItems": 10 } } }
+}

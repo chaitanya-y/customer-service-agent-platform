@@ -10,6 +10,8 @@ export type Conversation = {
   conversationId: string;
   status: 'OPEN' | 'CLOSED';
   controlMode: 'AI' | 'QUEUED' | 'HUMAN';
+  controlVersion?: number;
+  handoffSessionId?: string;
 };
 
 export type AcceptedMessage = {
@@ -17,12 +19,44 @@ export type AcceptedMessage = {
   messageId: string;
   sequenceNumber: number;
   status: 'ACCEPTED';
+  controlMode?: 'AI' | 'QUEUED' | 'HUMAN';
+  controlVersion?: number;
+  refundStart?: RefundStartReservation;
+};
+
+export type RefundStartInput = {
+  workflowId: string;
+  orderReference?: string | undefined;
+  proposal: {
+    proposalId: string;
+    journeyType: 'REFUND';
+    intent: {
+      orderId: string;
+      reasonCode: string;
+      scope: 'FULL_ORDER' | 'SELECTED_ITEMS';
+      itemIds: string[];
+      requestedAmount: { amountMinor: number; currency: string };
+    };
+  };
+  policyVersion: string;
+  access: {
+    tenantId: string; environmentId: string; subjectCustomerId: string;
+    requestId: string; traceId: string;
+  };
+};
+
+export type RefundStartReservation = {
+  workflowId: string;
+  status: 'PENDING' | 'STARTED' | 'ABORTED';
+  createdAt?: string;
+  startInput?: RefundStartInput;
+  assistantMessageId?: string;
 };
 
 export type ConversationTranscriptMessage = {
   messageId: string;
   sequenceNumber: number;
-  senderKind: 'END_CUSTOMER' | 'ASSISTANT';
+  senderKind: 'END_CUSTOMER' | 'ASSISTANT' | 'WORKFORCE';
   text: string;
   createdAt: string;
   refundWorkflowId?: string;
@@ -85,6 +119,10 @@ type AppendAssistantMessageRecord = {
   clientMessageId: string;
   protectedMessage: ProtectedMessage;
   occurredAt: Date;
+  expectedControlVersion?: number;
+  refundWorkflowId?: string;
+  refundStartInput?: RefundStartInput;
+  protectedRefundStartInput?: ProtectedMessage;
 };
 
 type LinkRefundWorkflowRecord = {
@@ -101,17 +139,25 @@ type LinkRefundWorkflowRecord = {
 export type CreateConversationPersistenceResult = {
   status: 'created' | 'duplicate';
   conversationId: string;
+  currentState?: Omit<Conversation, 'conversationId'>;
 };
 
 export type AcceptMessagePersistenceResult = {
   status: 'accepted' | 'duplicate';
   messageId: string;
   sequenceNumber: number;
+  controlMode?: 'AI' | 'QUEUED' | 'HUMAN';
+  controlVersion?: number;
+  refundStart?: RefundStartReservation;
 };
 
 export type RefundWorkflowLinkPersistenceResult = {
   status: 'linked' | 'duplicate';
   workflowId: string;
+};
+type RefundStartResolutionRecord = {
+  context: ConversationServiceAccessContext; conversationId: string; workflowId: string;
+  status: 'STARTED' | 'ABORTED'; idempotencyKey: string; canonicalRequestHash: string; occurredAt: Date;
 };
 
 export interface ConversationRepository {
@@ -127,6 +173,8 @@ export interface ConversationRepository {
   linkRefundWorkflow(
     record: LinkRefundWorkflowRecord,
   ): Promise<RefundWorkflowLinkPersistenceResult>;
+  resolveRefundStart(record: RefundStartResolutionRecord): Promise<{ workflowId: string; status: 'STARTED' | 'ABORTED' }>;
+  findRefundStart(context: ConversationServiceAccessContext, conversationId: string, assistantClientMessageId: string): Promise<RefundStartReservation | undefined>;
   readConversation(
     context: ConversationAccessContext,
     conversationId: string,
@@ -190,6 +238,8 @@ export function createConversationService({
         conversationId: result.conversationId,
         status: 'OPEN',
         controlMode: 'AI',
+        controlVersion: 1,
+        ...(result.currentState ?? {}),
       };
     },
 
@@ -226,6 +276,8 @@ export function createConversationService({
         messageId: result.messageId,
         sequenceNumber: result.sequenceNumber,
         status: 'ACCEPTED',
+        ...(result.controlMode === undefined ? {} : { controlMode: result.controlMode }),
+        ...(result.controlVersion === undefined ? {} : { controlVersion: result.controlVersion }),
       };
     },
 
@@ -235,12 +287,25 @@ export function createConversationService({
       idempotencyKey: string;
       clientMessageId: string;
       text: string;
+      expectedControlVersion?: number;
+      refundWorkflowId?: string;
+      refundStartInput?: RefundStartInput;
     }): Promise<AcceptedMessage> {
       if (Buffer.byteLength(input.text, 'utf8') > 32 * 1_024) {
         throw new MessageTooLargeError();
       }
+      if ((input.refundWorkflowId === undefined) !== (input.refundStartInput === undefined)) {
+        throw new IdempotencyConflictError();
+      }
+      if (input.refundStartInput && (
+        input.refundStartInput.workflowId !== input.refundWorkflowId ||
+        input.refundStartInput.access.tenantId !== input.context.tenantId ||
+        input.refundStartInput.access.environmentId !== input.context.environmentId ||
+        input.refundStartInput.access.subjectCustomerId !== input.context.subjectCustomerId
+      )) throw new IdempotencyConflictError();
 
       const occurredAt = now();
+      const serializedStartInput = input.refundStartInput === undefined ? undefined : JSON.stringify(input.refundStartInput);
       const result = await repository.appendAssistantMessage({
         context: input.context,
         conversationId: input.conversationId,
@@ -251,10 +316,17 @@ export function createConversationService({
         canonicalRequestHash: hashCanonicalRequest({
           clientMessageId: input.clientMessageId,
           text: input.text,
+          ...(input.expectedControlVersion === undefined ? {} : { expectedControlVersion: String(input.expectedControlVersion) }),
+          ...(input.refundWorkflowId === undefined ? {} : { refundWorkflowId: input.refundWorkflowId }),
+          ...(serializedStartInput === undefined ? {} : { refundStartInput: serializedStartInput }),
         }),
         clientMessageId: input.clientMessageId,
         protectedMessage: protectMessage(input.text),
         occurredAt,
+        ...(input.expectedControlVersion === undefined ? {} : { expectedControlVersion: input.expectedControlVersion }),
+        ...(input.refundWorkflowId === undefined ? {} : { refundWorkflowId: input.refundWorkflowId }),
+        ...(input.refundStartInput === undefined ? {} : { refundStartInput: input.refundStartInput }),
+        ...(serializedStartInput === undefined ? {} : { protectedRefundStartInput: protectMessage(serializedStartInput) }),
       });
 
       return {
@@ -262,6 +334,9 @@ export function createConversationService({
         messageId: result.messageId,
         sequenceNumber: result.sequenceNumber,
         status: 'ACCEPTED',
+        ...(result.controlMode === undefined ? {} : { controlMode: result.controlMode }),
+        ...(result.controlVersion === undefined ? {} : { controlVersion: result.controlVersion }),
+        ...(result.refundStart === undefined ? {} : { refundStart: result.refundStart }),
       };
     },
 
@@ -289,6 +364,12 @@ export function createConversationService({
       conversationId: string;
     }): Promise<ConversationTranscript> {
       return repository.readConversation(input.context, input.conversationId);
+    },
+    async resolveRefundStart(input: { context: ConversationServiceAccessContext; conversationId: string; workflowId: string; status: 'STARTED' | 'ABORTED'; idempotencyKey: string }) {
+      return repository.resolveRefundStart({ ...input, canonicalRequestHash: hashCanonicalRequest({ workflowId: input.workflowId, status: input.status }), occurredAt: now() });
+    },
+    async findRefundStart(input: { context: ConversationServiceAccessContext; conversationId: string; assistantClientMessageId: string }) {
+      return repository.findRefundStart(input.context, input.conversationId, input.assistantClientMessageId);
     },
   };
 }

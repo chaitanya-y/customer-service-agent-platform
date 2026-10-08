@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any
 
 from cso_observability import TelemetryState, initialize_telemetry
@@ -13,6 +14,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
+from knowledge_rag import api as knowledge_api
 from knowledge_rag import main as knowledge_main
 from knowledge_rag.api import (
     get_context_verifier,
@@ -22,8 +24,6 @@ from knowledge_rag.trusted_context import (
     KnowledgeRagContextAssertionError,
     VerifiedKnowledgeRagContext,
 )
-
-app = knowledge_main.app
 
 
 class FakeContextVerifier:
@@ -89,6 +89,11 @@ class FakeEvidenceRetriever:
         )
 
 
+app = knowledge_main.create_app(
+    warm_customer_evidence_retriever=lambda _telemetry_runtime: None
+)
+
+
 def enabled_runtime():
     span_exporter = InMemorySpanExporter()
     metric_reader = InMemoryMetricReader()
@@ -124,9 +129,45 @@ def test_health_reports_the_knowledge_service_is_ready() -> None:
     assert response.json() == {"service": "knowledge-rag", "status": "ok"}
 
 
+def test_lifespan_initializes_retriever_before_health_and_reuses_it(
+    monkeypatch,
+) -> None:
+    runtime, _, _, _ = enabled_runtime()
+    retriever = FakeEvidenceRetriever()
+    initialized: dict[object, FakeEvidenceRetriever] = {}
+    factory_calls: list[object] = []
+
+    def get_retriever(telemetry_runtime):
+        if telemetry_runtime not in initialized:
+            factory_calls.append(telemetry_runtime)
+            initialized[telemetry_runtime] = retriever
+        return initialized[telemetry_runtime]
+
+    monkeypatch.setattr(
+        knowledge_api, "_get_customer_evidence_retriever", get_retriever
+    )
+    local_app = knowledge_main.create_app(telemetry_runtime=runtime)
+
+    with TestClient(local_app) as client:
+        assert factory_calls == [runtime]
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"service": "knowledge-rag", "status": "ok"}
+        assert (
+            knowledge_api.get_customer_evidence_retriever(
+                SimpleNamespace(app=local_app)
+            )
+            is retriever
+        )
+        assert factory_calls == [runtime]
+
+
 def test_injected_runtime_emits_safe_health_telemetry() -> None:
     runtime, span_exporter, metric_reader, log_exporter = enabled_runtime()
-    local_app = knowledge_main.create_app(telemetry_runtime=runtime)
+    local_app = knowledge_main.create_app(
+        telemetry_runtime=runtime,
+        warm_customer_evidence_retriever=lambda _telemetry_runtime: None,
+    )
 
     response = TestClient(local_app).get(
         "/health?secret=CANARY",
@@ -145,21 +186,22 @@ def test_injected_runtime_emits_safe_health_telemetry() -> None:
 
 def test_trace_context_does_not_bypass_knowledge_authentication() -> None:
     runtime, span_exporter, _, _ = enabled_runtime()
-    local_app = knowledge_main.create_app(telemetry_runtime=runtime)
-    local_app.dependency_overrides[get_context_verifier] = (
-        lambda: FakeContextVerifier(error=KnowledgeRagContextAssertionError())
+    local_app = knowledge_main.create_app(
+        telemetry_runtime=runtime,
+        warm_customer_evidence_retriever=lambda _telemetry_runtime: None,
     )
-    local_app.dependency_overrides[get_customer_evidence_retriever] = (
-        lambda: FakeEvidenceRetriever()
+    local_app.dependency_overrides[get_context_verifier] = lambda: FakeContextVerifier(
+        error=KnowledgeRagContextAssertionError()
+    )
+    local_app.dependency_overrides[get_customer_evidence_retriever] = lambda: (
+        FakeEvidenceRetriever()
     )
 
     response = TestClient(local_app).post(
         "/v1/customer-evidence",
         json={"query_text": "CANARY"},
         headers={
-            "traceparent": (
-                "00-11111111111111111111111111111111-2222222222222222-01"
-            )
+            "traceparent": ("00-11111111111111111111111111111111-2222222222222222-01")
         },
     )
 
@@ -174,8 +216,8 @@ def test_customer_evidence_requires_trusted_context() -> None:
     app.dependency_overrides[get_context_verifier] = lambda: FakeContextVerifier(
         error=KnowledgeRagContextAssertionError()
     )
-    app.dependency_overrides[get_customer_evidence_retriever] = (
-        lambda: FakeEvidenceRetriever()
+    app.dependency_overrides[get_customer_evidence_retriever] = lambda: (
+        FakeEvidenceRetriever()
     )
     client = TestClient(app)
 
@@ -191,9 +233,7 @@ def test_customer_evidence_requires_trusted_context() -> None:
 
 def test_customer_evidence_uses_verified_context() -> None:
     retriever = FakeEvidenceRetriever()
-    app.dependency_overrides[get_context_verifier] = (
-        lambda: FakeContextVerifier()
-    )
+    app.dependency_overrides[get_context_verifier] = lambda: FakeContextVerifier()
     app.dependency_overrides[get_customer_evidence_retriever] = lambda: retriever
     client = TestClient(app)
 

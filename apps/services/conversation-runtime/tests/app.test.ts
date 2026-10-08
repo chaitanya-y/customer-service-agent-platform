@@ -65,6 +65,7 @@ test('creates an idempotent customer conversation', async (context) => {
       conversationId: TEST_CONVERSATION_ID,
       status: 'OPEN',
       controlMode: 'AI',
+      controlVersion: 1,
     },
     meta: {
       requestId: 'request-1',
@@ -231,6 +232,37 @@ test('returns a customer-safe ordered transcript to its owner', async (context) 
     },
   });
   assert.equal(JSON.stringify(response.json()).includes('ciphertext'), false);
+});
+
+test('refund start recovery lookup requires the Edge service assertion and returns only the owned reservation', async (context) => {
+  const repository = new FakeConversationRepository();
+  let lookups = 0;
+  repository.findRefundStart = async (scope, conversationId, assistantClientMessageId) => {
+    lookups += 1;
+    assert.equal(scope.subjectCustomerId, TEST_SERVICE_CONTEXT.subjectCustomerId);
+    assert.equal(conversationId, TEST_CONVERSATION_ID);
+    assert.equal(assistantClientMessageId, 'assistant-client-1');
+    return { workflowId: 'refund-1', status: 'PENDING', assistantMessageId: TEST_MESSAGE_ID,
+      createdAt: '2026-10-02T12:00:00.000Z', startInput: { workflowId: 'refund-1',
+        proposal: { proposalId: '1', journeyType: 'REFUND', intent: { orderId: 'order-1',
+          reasonCode: 'DAMAGED', scope: 'FULL_ORDER', itemIds: [], requestedAmount: { amountMinor: 100, currency: 'USD' } } },
+        policyVersion: 'v1', access: { tenantId: 'tenant-local', environmentId: 'local', subjectCustomerId: 'customer-42', requestId: 'r1', traceId: 't1' } },
+    };
+  };
+  const app = buildApp({ verifyContextAssertion: async () => TEST_CONTEXT,
+    verifyServiceAssertion: async (assertion) => {
+      if (assertion !== 'signed-edge') throw new ServiceAssertionError();
+      return TEST_SERVICE_CONTEXT;
+    }, conversationService: createTestConversationService(repository), checkHealth: async () => undefined });
+  context.after(() => app.close());
+  const url = `/v1/internal/conversations/${TEST_CONVERSATION_ID}/refund-starts/by-assistant-client/assistant-client-1`;
+  const unauthenticated = await app.inject({ method: 'GET', url });
+  assert.equal(unauthenticated.statusCode, 401);
+  assert.equal(lookups, 0);
+  const authorized = await app.inject({ method: 'GET', url, headers: { 'x-cso-service-assertion': 'signed-edge' } });
+  assert.equal(authorized.statusCode, 200);
+  assert.equal(authorized.json().data.startInput.proposal.intent.orderId, 'order-1');
+  assert.equal(lookups, 1);
 });
 
 test('does not reveal a conversation to another customer', async (context) => {

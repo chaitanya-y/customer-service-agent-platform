@@ -23,6 +23,7 @@ export function createGetOrderContext({
 
     if (
       !order?.customer ||
+      order.reference !== orderReference ||
       order.customer.id !== accessContext.subjectCustomerId
     ) {
       return null;

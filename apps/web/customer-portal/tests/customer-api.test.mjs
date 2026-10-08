@@ -49,6 +49,12 @@ test("keeps the exact review deadline while confirmation is pending", () => {
   assert.equal(customerApi.getRefundReviewDeadline(journey), deadline);
 });
 
+test("keeps the contact-support action visible for a failed refund", () => {
+  const journey = createJourney("REFUND_FAILED", "CONTACT_SUPPORT");
+  assert.equal(journey.nextAction, "CONTACT_SUPPORT");
+  assert.equal(customerApi.getRefundReviewDeadline(journey), undefined);
+});
+
 test("hides the review deadline for wait and no-action journeys, even when a preview remains", () => {
   for (const stage of [
     "REQUEST_RECEIVED",

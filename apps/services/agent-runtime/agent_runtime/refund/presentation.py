@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Literal
 
 from agent_runtime.integrations.order_lookup import Money
@@ -18,10 +19,54 @@ AnswerPurpose = Literal[
     "policy_question",
 ]
 
+# Version the deterministic customer-facing post-processing separately from the model prompt.
+REFUND_ANSWER_PRESENTATION_VERSION = "refund-answer-presentation-v1"
+
 AMOUNT_REVIEW_CONTEXT_REQUIRED = (
     "I can explain the applicable amount-review path once the refund amount "
     "and request details are available."
 )
+
+_PERSONAL_REFUND = re.compile(
+    r"\b(?:my|our)\b.{0,80}\brefund\b"
+    r"|\brefund\b.{0,40}\bfor\s+(?:my|our)\s+order\b",
+    re.IGNORECASE,
+)
+_AUTOMATIC_APPROVAL = re.compile(
+    r"\b(?:auto[- ]?approv(?:e|ed|al)|automatic\s+approval|"
+    r"automatically\s+(?:be\s+)?approved|approved\s+automatically)\b",
+    re.IGNORECASE,
+)
+_QUESTION_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?]\s*|,\s*(?:and|but)\s+|;\s*", re.IGNORECASE
+)
+_FUTURE_QUESTION_START = re.compile(r"^\s*(?:will|would|can|could)\b", re.IGNORECASE)
+_ELIGIBILITY_QUESTION_START = re.compile(r"^\s*(?:is|are|do|does)\b", re.IGNORECASE)
+_ELIGIBILITY_QUESTION_TERM = re.compile(
+    r"\b(?:eligible|qualif(?:y|ies)|possible)\b", re.IGNORECASE
+)
+_PAST_APPROVAL_STATUS = re.compile(
+    r"\b(?:have|has)\s+(?:already\s+)?been\s+(?:automatically\s+)?approved\b"
+    r"|\b(?:already|previously)\s+(?:been\s+|be\s+)?"
+    r"(?:automatically\s+)?approved\b",
+    re.IGNORECASE,
+)
+
+
+def asks_about_personal_automatic_approval(customer_message: str) -> bool:
+    """Recognize the narrow personal question that needs trusted amount rendering."""
+    for clause in _QUESTION_CLAUSE_BOUNDARY.split(customer_message):
+        if not (_PERSONAL_REFUND.search(clause) and _AUTOMATIC_APPROVAL.search(clause)):
+            continue
+        if _PAST_APPROVAL_STATUS.search(clause):
+            continue
+        if _FUTURE_QUESTION_START.match(clause):
+            return True
+        if _ELIGIBILITY_QUESTION_START.match(
+            clause
+        ) and _ELIGIBILITY_QUESTION_TERM.search(clause):
+            return True
+    return False
 
 
 def format_requested_amount(amount: Money | None) -> str | None:

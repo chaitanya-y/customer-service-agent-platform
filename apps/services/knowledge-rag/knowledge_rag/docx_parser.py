@@ -31,6 +31,10 @@ def parse_docx(
     source_content_sha256: str,
 ) -> NormalizedDocument:
     document = Document(source_path)
+    if document.tables:
+        raise ValueError(
+            "DOCX tables are not supported by parser-v1; source was not indexed."
+        )
 
     title = ""
     heading_stack: list[str] = []
@@ -101,17 +105,6 @@ def parse_docx(
 
     if not sections:
         raise ValueError("DOCX contained no extractable section text.")
-
-    if document.tables:
-        warnings.append(
-            ExtractionWarning(
-                code="DOCX_TABLES_NOT_EXTRACTED",
-                message=(
-                    "The document contains tables. Table extraction is not yet "
-                    "implemented, so their content was not indexed."
-                ),
-            )
-        )
 
     return NormalizedDocument(
         source_uri=source_uri,

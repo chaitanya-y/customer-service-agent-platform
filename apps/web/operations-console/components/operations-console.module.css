@@ -104,7 +104,10 @@
 }
 
 .statusOPEN { background: var(--accent-soft); color: var(--accent-strong); }
+.statusRECEIVED { background: var(--accent-soft); color: var(--accent-strong); }
 .statusCLAIMED { background: color-mix(in srgb, var(--status-info) 15%, transparent); color: var(--status-info); }
+.statusACKNOWLEDGED { background: color-mix(in srgb, var(--status-success) 16%, transparent); color: var(--status-success); }
+.statusREVIEW_CLOSED { background: color-mix(in srgb, var(--status-success) 16%, transparent); color: var(--status-success); }
 .statusDECISION_PENDING { background: color-mix(in srgb, #d98b2b 18%, transparent); color: #995600; }
 .statusCLOSED { background: color-mix(in srgb, var(--status-success) 16%, transparent); color: var(--status-success); }
 

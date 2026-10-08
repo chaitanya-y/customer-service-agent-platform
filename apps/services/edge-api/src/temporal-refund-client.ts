@@ -1,4 +1,6 @@
-import { WorkflowClient, WorkflowNotFoundError } from '@temporalio/client';
+import { createHash } from 'node:crypto';
+
+import { WorkflowClient, WorkflowExecutionAlreadyStartedError, WorkflowNotFoundError } from '@temporalio/client';
 
 export type RefundWorkflowStartInput = Readonly<{
   workflowId: string;
@@ -99,18 +101,36 @@ export function createTemporalRefundClient({
 
   return {
     async startRefundWorkflow(input) {
-      const handle = await client.start('refundWorkflow', {
-        taskQueue,
-        workflowId: input.workflowId,
-        args: [{
-          ...(input.orderReference === undefined ? {} : { orderReference: input.orderReference }),
-          proposal: input.proposal,
-          policyVersion: input.policyVersion,
-          access: input.access,
-        }],
-      });
-
-      return { workflowId: handle.workflowId };
+      // Only a digest is visible in Temporal metadata. The complete intent is
+      // stored in the encrypted conversation reservation before this call.
+      const digest = createHash('sha256').update(JSON.stringify(input, (_key, value) =>
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+          : value,
+      )).digest('hex');
+      try {
+        const handle = await client.start('refundWorkflow', {
+          taskQueue,
+          workflowId: input.workflowId,
+          workflowIdReusePolicy: 'REJECT_DUPLICATE',
+          workflowIdConflictPolicy: 'FAIL',
+          memo: { refundStartDigest: digest },
+          args: [{
+            ...(input.orderReference === undefined ? {} : { orderReference: input.orderReference }),
+            proposal: input.proposal,
+            policyVersion: input.policyVersion,
+            access: input.access,
+          }],
+        });
+        return { workflowId: handle.workflowId };
+      } catch (error) {
+        if (!(error instanceof WorkflowExecutionAlreadyStartedError)) throw error;
+        const existing = await client.getHandle(input.workflowId).describe();
+        if (existing.memo?.refundStartDigest !== digest) {
+          throw new Error('Existing refund workflow does not match the reserved start');
+        }
+        return { workflowId: input.workflowId };
+      }
     },
     async getRefundWorkflow({ workflowId, access }) {
       const handle = await getOwnedHandle(workflowId, access);

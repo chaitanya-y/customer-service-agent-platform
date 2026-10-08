@@ -11,6 +11,12 @@ import { PostgresRefundEvidenceRepository } from './postgres-refund-evidence-rep
 import { closeFastifyWithin, runWithin } from './observability.js';
 import { getTelemetry } from './telemetry-state.js';
 import { startDecisionOutboxObserver, type DecisionOutboxObserver } from './decision-outbox-observer.js';
+import { PostgresDeliveryIssueReportRepository } from './postgres-delivery-issue-report-repository.js';
+import { createDeliveryReportAssertionVerifier } from './delivery-report-access.js';
+import { createDeliveryStaffAssertionVerifier } from './delivery-staff-access.js';
+import { resolveEvidenceConfig } from './evidence-config.js';
+import { createSupportStaffAssertionVerifier } from './support-staff-access.js';
+import { createConversationHandoffClient, resolveConversationHandoffConfig } from './conversation-handoff-client.js';
 
 const telemetry = getTelemetry();
 
@@ -19,7 +25,8 @@ const tenantId = process.env.TENANT_ID;
 const environmentId = process.env.ENVIRONMENT_ID;
 const workflowSecret = process.env.HUMAN_OPERATIONS_WORKFLOW_HMAC_SECRET;
 const databaseUrl = process.env.DATABASE_URL;
-if (!secret || secret.length < 32 || !workflowSecret || workflowSecret.length < 32 || !tenantId || !environmentId || !databaseUrl) {
+const deliveryReportSecret = process.env.CONTEXT_ASSERTION_HMAC_SECRET;
+if (!secret || secret.length < 32 || !workflowSecret || workflowSecret.length < 32 || !deliveryReportSecret || deliveryReportSecret.length < 32 || !tenantId || !environmentId || !databaseUrl) {
   throw new Error('INVALID_HUMAN_OPERATIONS_CONFIG');
 }
 
@@ -29,12 +36,15 @@ const connection = await Connection.connect({
 const client = new WorkflowClient({ connection });
 const pool = new Pool({ connectionString: databaseUrl });
 const repository = new PostgresHumanCaseRepository(pool);
-// Both settings are required together. Never default photo storage into the checkout.
-const evidenceDirectory = process.env.REFUND_EVIDENCE_STORAGE_DIR;
-const evidenceSecret = process.env.CONTEXT_ASSERTION_HMAC_SECRET;
-if (Boolean(evidenceDirectory) !== Boolean(evidenceSecret)) throw new Error('INVALID_EVIDENCE_CONFIG');
-const evidenceRepository = evidenceDirectory ? new PostgresRefundEvidenceRepository(pool) : undefined;
-const evidenceStore = evidenceDirectory ? await PrivateEvidenceStore.create(evidenceDirectory) : undefined;
+// The assertion secret also serves delivery reports; only the explicit
+// storage directory enables photo evidence. Never default it into the checkout.
+const evidenceConfig = resolveEvidenceConfig(
+  process.env.REFUND_EVIDENCE_STORAGE_DIR,
+  process.env.CONTEXT_ASSERTION_HMAC_SECRET,
+);
+const evidenceRepository = evidenceConfig ? new PostgresRefundEvidenceRepository(pool) : undefined;
+const evidenceStore = evidenceConfig ? await PrivateEvidenceStore.create(evidenceConfig.storageDirectory) : undefined;
+const supportConfig = resolveConversationHandoffConfig(process.env);
 const sendDecision: SendDecision = async ({ workflowId, access, decision, decidedAt, reasonCode }) => {
   const handle = client.getHandle(workflowId);
   const workflowAccess = await handle.query<{ tenantId: string; environmentId: string }>('refund.access');
@@ -50,9 +60,21 @@ const sendDecision: SendDecision = async ({ workflowId, access, decision, decide
 };
 const app = buildApp({
   repository,
-  ...(evidenceRepository && evidenceStore && evidenceSecret ? { evidence: {
+  ...(supportConfig ? { support: {
+    verifyStaff: createSupportStaffAssertionVerifier({ secret,
+      issuer: process.env.HUMAN_ACCESS_ISSUER ?? 'customer-service-os-human-operations', tenantId, environmentId }),
+    client: createConversationHandoffClient(supportConfig),
+  } } : {}),
+  delivery: {
+    repository: new PostgresDeliveryIssueReportRepository(pool),
+    verifyCustomer: createDeliveryReportAssertionVerifier({ secret: deliveryReportSecret,
+      issuer: process.env.CONTEXT_ASSERTION_ISSUER ?? 'customer-service-os-edge', tenantId, environmentId }),
+    verifyStaff: createDeliveryStaffAssertionVerifier({ secret,
+      issuer: process.env.HUMAN_ACCESS_ISSUER ?? 'customer-service-os-human-operations', tenantId, environmentId }),
+  },
+  ...(evidenceRepository && evidenceStore && evidenceConfig ? { evidence: {
     repository: evidenceRepository, store: evidenceStore,
-    verifyCustomer: createEvidenceAccessVerifier({ secret: evidenceSecret, issuer: process.env.CONTEXT_ASSERTION_ISSUER ?? 'customer-service-os-edge', tenantId, environmentId }),
+    verifyCustomer: createEvidenceAccessVerifier({ secret: evidenceConfig.contextSecret, issuer: process.env.CONTEXT_ASSERTION_ISSUER ?? 'customer-service-os-edge', tenantId, environmentId }),
   } } : {}),
   verifyHuman: createHumanAssertionVerifier({
     secret,

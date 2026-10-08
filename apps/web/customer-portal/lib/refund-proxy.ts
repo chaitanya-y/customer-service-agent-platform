@@ -5,6 +5,7 @@ import {
   LOCAL_CUSTOMER_SESSION_COOKIE,
 } from "@cso/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { safeEdgeFetch } from "./safe-edge-fetch";
 
 type LocalCustomerAuthorization = {
   authorization: string;
@@ -126,6 +127,7 @@ export async function proxyEdgeApi(input: {
   headers?: Readonly<Record<string, string>>;
   method: "GET" | "POST";
   path: string;
+  signal?: AbortSignal;
 }): Promise<NextResponse> {
   let endpoint: URL;
 
@@ -140,10 +142,11 @@ export async function proxyEdgeApi(input: {
   }
 
   try {
-    const upstreamResponse = await fetch(endpoint, {
+    const upstreamResponse = await safeEdgeFetch(endpoint, {
       method: input.method,
       body: input.body,
       cache: "no-store",
+      ...(input.signal ? { signal: input.signal } : {}),
       headers: {
         accept: "application/json",
         authorization: input.authorization.authorization,
@@ -177,7 +180,7 @@ export async function proxyEdgeEvidence(input: {
   headers?: Record<string, string>;
 }): Promise<NextResponse> {
   try {
-    const upstream = await fetch(new URL(input.path, EDGE_API_BASE_URL), {
+    const upstream = await safeEdgeFetch(new URL(input.path, EDGE_API_BASE_URL), {
       method: input.body ? "POST" : "GET",
       body: input.body,
       cache: "no-store",
@@ -230,7 +233,7 @@ export async function proxyEdgeEventStream(input: {
   }
 
   try {
-    const upstreamResponse = await fetch(endpoint, {
+    const upstreamResponse = await safeEdgeFetch(endpoint, {
       cache: "no-store",
       headers: {
         accept: "text/event-stream",

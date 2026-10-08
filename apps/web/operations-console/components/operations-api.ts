@@ -27,7 +27,7 @@ export async function getConsoleData(path: string): Promise<unknown> {
   return body;
 }
 
-export async function postConsoleData(path: string, body: unknown, idempotencyKey = crypto.randomUUID()): Promise<unknown> {
+export async function postConsoleData(path: string, body: unknown, idempotencyKey = crypto.randomUUID(), fallback = "The human decision could not be recorded."): Promise<unknown> {
   const response = await fetch(path, {
     method: "POST",
     headers: {
@@ -37,6 +37,6 @@ export async function postConsoleData(path: string, body: unknown, idempotencyKe
     body: JSON.stringify(body),
   });
   const responseBody = await readJson(response);
-  if (!response.ok) throw new OperationsApiError(response.status, responseBody, "The human decision could not be recorded.");
+  if (!response.ok) throw new OperationsApiError(response.status, responseBody, fallback);
   return responseBody;
 }

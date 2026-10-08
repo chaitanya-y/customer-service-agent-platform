@@ -34,6 +34,7 @@ export function toOrderContext(
       sku: item.sku,
       name: item.name,
       quantity: item.quantity,
+      ...(item.orderedQuantity === undefined ? {} : { orderedQuantity: item.orderedQuantity }),
       unitPrice: {
         amountMinor: item.unitPrice.amountMinor,
         currency: item.unitPrice.currency,

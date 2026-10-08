@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { WorkflowNotFoundError, type WorkflowClient } from '@temporalio/client';
+import { WorkflowExecutionAlreadyStartedError, WorkflowNotFoundError, type WorkflowClient } from '@temporalio/client';
 
 import {
   createTemporalRefundClient,
@@ -34,6 +34,49 @@ const ready: RefundWorkflowView = {
   },
 };
 const confirmedAt = '2026-09-05T12:34:56.789Z';
+
+test('refund start rejects workflow ID reuse and only accepts a matching existing start', async () => {
+  const startInput = {
+    workflowId: 'refund-proposal-1',
+    proposal: {
+      proposalId: 'proposal-1', journeyType: 'REFUND' as const,
+      intent: { orderId: 'order-1', reasonCode: 'DAMAGED', scope: 'FULL_ORDER' as const,
+        itemIds: [], requestedAmount: { amountMinor: 100, currency: 'USD' } },
+    },
+    policyVersion: 'refund-policy-v1', access,
+  };
+  let recordedMemo: Record<string, unknown> | undefined;
+  const calls: string[] = [];
+  const temporal = createTemporalRefundClient({
+    client: {
+      async start(_type: string, options: { workflowIdReusePolicy?: string; workflowIdConflictPolicy?: string; memo?: Record<string, unknown> }) {
+        calls.push('start');
+        assert.equal(options.workflowIdReusePolicy, 'REJECT_DUPLICATE');
+        assert.equal(options.workflowIdConflictPolicy, 'FAIL');
+        recordedMemo = options.memo;
+        throw new WorkflowExecutionAlreadyStartedError('already started', startInput.workflowId, 'refundWorkflow');
+      },
+      getHandle() {
+        calls.push('getHandle');
+        return { async describe() { calls.push('describe'); return { memo: recordedMemo }; } };
+      },
+    } as unknown as WorkflowClient,
+    taskQueue: 'refund-tests',
+  });
+
+  assert.deepEqual(await temporal.startRefundWorkflow(startInput), { workflowId: startInput.workflowId });
+  assert.deepEqual(calls, ['start', 'getHandle', 'describe']);
+  assert.deepEqual(Object.keys(recordedMemo ?? {}), ['refundStartDigest']);
+
+  const hostile = createTemporalRefundClient({
+    client: {
+      async start() { throw new WorkflowExecutionAlreadyStartedError('already started', startInput.workflowId, 'refundWorkflow'); },
+      getHandle() { return { async describe() { return { memo: { refundStartDigest: 'different' } }; } }; },
+    } as unknown as WorkflowClient,
+    taskQueue: 'refund-tests',
+  });
+  await assert.rejects(hostile.startRefundWorkflow(startInput));
+});
 
 function makeClient(options: {
   owner?: typeof access;

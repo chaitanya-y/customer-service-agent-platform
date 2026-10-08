@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/delivery-order-ownership/v1",
+  "title": "DeliveryOrderOwnershipV1",
+  "description": "Minimal owned-order proof returned by the Integration Gateway for a delivery issue report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "reference"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    }
+  }
+}

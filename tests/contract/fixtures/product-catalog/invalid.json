@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "matches": [
+    {
+      "name": "Cloud Soft Hoodie",
+      "description": "A lightweight cotton hoodie.",
+      "variants": [
+        {
+          "name": "Small / Blue",
+          "price": {
+            "amountMinor": 4900,
+            "currency": "USD"
+          }
+        }
+      ],
+      "sourceId": "vendure-123"
+    }
+  ]
+}

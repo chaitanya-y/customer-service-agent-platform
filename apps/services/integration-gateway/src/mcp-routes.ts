@@ -3,6 +3,9 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { FastifyInstance } from 'fastify';
 
 import type { GetOrderContext } from './get-order-context.js';
+import type { GetProductCatalog } from './product-catalog.js';
+import type { GetPaymentStatus } from './payment-status.js';
+import type { GetRecentOrderReferences } from './recent-order-references.js';
 import { createIntegrationMcpServer } from './mcp-server.js';
 import {
   CONTEXT_ASSERTION_HEADER,
@@ -23,6 +26,9 @@ export function registerMcpRoutes(
   app: FastifyInstance,
   getOrderContext: GetOrderContext,
   verifyContextAssertion: VerifyContextAssertion,
+  getPaymentStatus: GetPaymentStatus,
+  getProductCatalog?: GetProductCatalog,
+  getRecentOrderReferences?: GetRecentOrderReferences,
 ): void {
   app.post('/mcp', async (request, reply) => {
     let accessContext: OrderAccessContext | null = null;
@@ -38,6 +44,9 @@ export function registerMcpRoutes(
 
     const server = createIntegrationMcpServer({
       getOrderContext,
+      ...(getProductCatalog ? { getProductCatalog } : {}),
+      getPaymentStatus,
+      ...(getRecentOrderReferences ? { getRecentOrderReferences } : {}),
       accessContext,
     });
     const transport = new StreamableHTTPServerTransport({

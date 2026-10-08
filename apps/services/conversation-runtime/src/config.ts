@@ -16,6 +16,7 @@ const configSchema = z.object({
     .min(1)
     .default('conversation-runtime'),
   EDGE_SERVICE_ASSERTION_HMAC_SECRET: z.string().min(32),
+  CONVERSATION_STAFF_ASSERTION_HMAC_SECRET: z.string().min(32).optional(),
   EDGE_SERVICE_ASSERTION_ISSUER: z
     .string()
     .min(1)
@@ -27,6 +28,9 @@ const configSchema = z.object({
   MESSAGE_ENCRYPTION_KEY_BASE64: z.string().min(1),
   MESSAGE_ENCRYPTION_KEY_VERSION: z.string().min(1).default('local-v1'),
 }).superRefine((config, context) => {
+  if (config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET !== undefined && [config.CONTEXT_ASSERTION_HMAC_SECRET, config.EDGE_SERVICE_ASSERTION_HMAC_SECRET, config.MESSAGE_ENCRYPTION_KEY_BASE64].includes(config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET)) {
+    context.addIssue({ code: 'custom', message: 'Conversation staff assertions require a separate key', path: ['CONVERSATION_STAFF_ASSERTION_HMAC_SECRET'] });
+  }
   if (
     config.CONTEXT_ASSERTION_HMAC_SECRET ===
     config.EDGE_SERVICE_ASSERTION_HMAC_SECRET

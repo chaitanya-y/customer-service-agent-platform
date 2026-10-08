@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildApp } from '../src/app.js';
+import { buildApp as buildAppImplementation } from '../src/app.js';
 import { RefundPreviewUnavailableError, RefundWorkflowNotFoundError } from '../src/temporal-refund-client.js';
 
 const TEST_IDENTITY = {
@@ -11,6 +11,11 @@ const TEST_IDENTITY = {
   customerId: 'customer-42',
 };
 const TEST_CONVERSATION_ID = '019c321e-8650-7000-8000-000000000001';
+
+const buildApp: typeof buildAppImplementation = (options) => buildAppImplementation({
+  ...options,
+  intakeSupport: options.intakeSupport ?? options.intakeRefund,
+});
 
 function conversationResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -76,7 +81,10 @@ function acceptedCustomerConversation(
 const readyAgentResponse = {
   statusCode: 200,
   body: {
+    journey: 'refund',
     status: 'refund_proposal_ready',
+    customer_message: 'Please refund my order.',
+    order_reference: 'ORDER-123',
     customer_answer: {
       message: 'I have captured your refund request.',
       citations: [
@@ -143,6 +151,65 @@ test('returns a refund workflow stage for an authenticated customer', async (con
     workflow_id: 'refund-001',
     stage: 'AWAITING_CUSTOMER_CONFIRMATION',
   });
+});
+
+test('rejects invalid verifier identities before reading a refund workflow', async (context) => {
+  const invalidIdentities = [
+    { ...TEST_IDENTITY, principalId: 'customer-other' },
+    { ...TEST_IDENTITY, customerId: '' },
+    { ...TEST_IDENTITY, tenantId: 'tenant other' },
+    { ...TEST_IDENTITY, environmentId: undefined },
+  ];
+
+  for (const identity of invalidIdentities) {
+    let workflowRead = false;
+    const app = buildApp({
+      verifyCustomerIdentity: async () => identity as typeof TEST_IDENTITY,
+      signContextAssertion: async () => 'signed-context',
+      signAgentRuntimeContextAssertion: async () => 'agent-runtime-context',
+      signKnowledgeRagContextAssertion: async () => 'knowledge-rag-context',
+      intakeRefund: async () => ({ statusCode: 200, body: {} }),
+      getRefundWorkflow: async () => {
+        workflowRead = true;
+        return { stage: 'AWAITING_CUSTOMER_CONFIRMATION' };
+      },
+    });
+    context.after(() => app.close());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/refunds/refund-001',
+      headers: { authorization: 'Bearer customer-access-token' },
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal(workflowRead, false);
+  }
+});
+
+test('rejects invalid verifier identity before refund intake reaches the agent', async (context) => {
+  let agentCalled = false;
+  const app = buildApp({
+    verifyCustomerIdentity: async () => ({ ...TEST_IDENTITY, principalId: 'customer-other' }),
+    signContextAssertion: async () => 'signed-context',
+    signAgentRuntimeContextAssertion: async () => 'agent-runtime-context',
+    signKnowledgeRagContextAssertion: async () => 'knowledge-rag-context',
+    intakeRefund: async () => {
+      agentCalled = true;
+      return { statusCode: 200, body: {} };
+    },
+  });
+  context.after(() => app.close());
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/refunds/intake',
+    headers: { authorization: 'Bearer customer-access-token' },
+    payload: { customer_message: 'Please refund my order.' },
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(agentCalled, false);
 });
 
 test('returns a versioned customer-safe refund journey for its owner', async (context) => {
@@ -605,6 +672,25 @@ test('creates a conversation with a scoped idempotency key', async (context) => 
   });
 });
 
+test('conversation creation replay preserves human control metadata', async (context) => {
+  const app = buildApp({
+    verifyCustomerIdentity: async () => TEST_IDENTITY,
+    signContextAssertion: async () => 'gateway-context',
+    signAgentRuntimeContextAssertion: async () => 'agent-context',
+    signKnowledgeRagContextAssertion: async () => 'rag-context',
+    signConversationRuntimeContextAssertion: async () => 'conversation-context',
+    intakeRefund: async () => readyAgentResponse,
+    createConversation: async () => conversationResponse({ controlMode: 'HUMAN', controlVersion: 3,
+      handoffSessionId: '019c321e-8650-7000-8000-000000000003' }),
+  });
+  context.after(() => app.close());
+  const response = await app.inject({ method: 'POST', url: '/v1/conversations',
+    headers: { authorization: 'Bearer customer-access-token', 'idempotency-key': 'replay-create-1' }, payload: {} });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(response.json(), { conversation_id: TEST_CONVERSATION_ID, status: 'OPEN', control_mode: 'HUMAN',
+    control_version: 3, handoff_session_id: '019c321e-8650-7000-8000-000000000003' });
+});
+
 test('returns a customer safe conversation transcript', async (context) => {
   const app = buildApp({
     verifyCustomerIdentity: async () => TEST_IDENTITY,
@@ -652,6 +738,7 @@ test('returns a customer safe conversation transcript', async (context) => {
     conversation_id: TEST_CONVERSATION_ID,
     status: 'OPEN',
     control_mode: 'AI',
+    control_version: 1,
     messages: [
       {
         message_id: 'message-1',
@@ -695,6 +782,7 @@ test('extracts an order reference from chat, appends the safe answer, then start
       assert.match(input.idempotencyKey, /^cso-[a-f0-9]{64}$/);
       return acceptedMessageResponse('customer-message-1', 1);
     },
+    getRefundStart: async () => ({ statusCode: 404, body: { error: { code: 'REFUND_START_NOT_FOUND' } } }),
     getConversation: async () => acceptedCustomerConversation(
       'customer-message-1',
       1,
@@ -724,7 +812,10 @@ test('extracts an order reference from chat, appends the safe answer, then start
       assert.match(input.idempotencyKey, /^cso-[a-f0-9]{64}$/);
       assert.match(input.clientMessageId, /^cso-[a-f0-9]{64}$/);
       assert.equal(input.text, 'I have captured your refund request.');
-      return acceptedMessageResponse('assistant-message-1', 2);
+      return { statusCode: 202, body: { data: {
+        conversationId: TEST_CONVERSATION_ID, messageId: 'assistant-message-1', sequenceNumber: 2, status: 'ACCEPTED',
+        refundStart: { workflowId: 'refund-proposal-001', status: 'PENDING', startInput: input.refundStartInput },
+      } } };
     },
     startRefundWorkflow: async (input) => {
       assert.deepEqual(input, {
@@ -853,7 +944,10 @@ test('carries a prior customer order reference and bounded customer history into
       return {
         statusCode: 200,
         body: {
+          journey: 'refund',
           status: 'awaiting_refund_details',
+          customer_message: 'The item arrived damaged. I want a full refund for item 3.',
+          order_reference: 'AVV8JSZH8G6ZZDMX',
           customer_answer: { message: 'Please share a photo of the damaged item.' },
         },
       };
@@ -899,7 +993,10 @@ test('does not start a workflow while refund details are still missing', async (
     intakeRefund: async () => ({
       statusCode: 200,
       body: {
+        journey: 'refund',
         status: 'awaiting_refund_details',
+        customer_message: 'The item was damaged.',
+        order_reference: 'ORDER-123',
         customer_answer: {
           message: 'Please provide a photo of the damaged item.',
         },
@@ -963,7 +1060,10 @@ test('persists the deterministic order-reference reply without starting a workfl
     intakeRefund: async () => ({
       statusCode: 200,
       body: {
+        journey: 'refund',
         status: 'awaiting_order_reference',
+        customer_message: 'I need help with a refund.',
+        order_reference: null,
         customer_answer: {
           message: 'Please share your order reference so I can look into this refund request.',
         },
@@ -1190,6 +1290,7 @@ test('returns a stable error when assistant persistence fails', async (context) 
     signConversationRuntimeContextAssertion: async () => 'conversation-context',
     signEdgeServiceAssertion: async () => 'service-context',
     acceptCustomerMessage: async () => acceptedMessageResponse('customer-message-1', 1),
+    getRefundStart: async () => ({ statusCode: 404, body: { error: { code: 'REFUND_START_NOT_FOUND' } } }),
     getConversation: async () => acceptedCustomerConversation(
       'customer-message-1',
       1,
@@ -1200,6 +1301,8 @@ test('returns a stable error when assistant persistence fails', async (context) 
       statusCode: 500,
       body: { error: { internal_detail: 'database stack trace' } },
     }),
+    startRefundWorkflow: async () => { throw new Error('must not start workflow'); },
+    linkRefundWorkflow: async () => { throw new Error('must not link workflow'); },
   });
   context.after(() => app.close());
 

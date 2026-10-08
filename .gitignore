@@ -21,6 +21,7 @@ __pycache__/
 .vscode/
 .idea/
 .gstack/
+.superpowers/
 
 # Local-only Mitti storefront, including temporary user-provided imagery.
 /apps/web/storefront/

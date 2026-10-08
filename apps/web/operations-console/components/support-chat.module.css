@@ -1,0 +1,22 @@
+.panel { background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 16px; display: grid; gap: 20px; padding: 28px; }
+.header { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; }
+.header h1 { margin: 8px 0; }
+.muted { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.queue { display: grid; gap: 12px; }
+.queueItem { border: 1px solid var(--border-subtle); border-radius: 10px; color: var(--text-primary); display: grid; gap: 6px; padding: 16px; text-decoration: none; }
+.queueItem:hover { background: var(--accent-soft); }
+.detailGrid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); }
+.transcript { display: grid; gap: 14px; align-content: start; max-height: 650px; overflow: auto; }
+.message { background: var(--surface-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 16px; }
+.message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message time { color: var(--text-secondary); font-size: 12px; }
+.controls { display: grid; gap: 14px; align-content: start; }
+.controls h2, .controls p { margin: 0; }
+.controls form { display: grid; gap: 10px; }
+.controls textarea { background: var(--surface-canvas); border: 1px solid var(--border-subtle); border-radius: 8px; color: var(--text-primary); padding: 12px; resize: vertical; width: 100%; }
+.controls button, .header button, .actions button { border: 1px solid var(--border-subtle); border-radius: 8px; cursor: pointer; padding: 10px 14px; }
+.controls button:disabled, .header button:disabled, .actions button:disabled { cursor: default; opacity: .55; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.notice { background: var(--accent-soft); border-radius: 8px; padding: 14px; }
+.error { background: color-mix(in srgb, #a72d35 16%, var(--surface-raised)); border-radius: 8px; padding: 14px; }
+@media (max-width: 760px) { .detailGrid { grid-template-columns: 1fr; } .panel { padding: 20px; } }

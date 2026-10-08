@@ -11,14 +11,16 @@ import { createHmacContextAssertionSigner } from '../../apps/services/edge-api/s
 const telemetry = initializeTelemetry({ serviceName: 'integration-gateway' });
 const secret = process.env.CONTEXT_ASSERTION_HMAC_SECRET!;
 const provider = createVendureCommerceProvider({
-  adminApiUrl: 'http://synthetic.invalid/admin-api', apiKey: 'CANARY_CONTENT', telemetry,
+  adminApiUrl: 'http://synthetic.invalid/admin-api', apiKey: 'CANARY_CONTENT',
+  channelToken: 'smoke-channel-token', expectedChannelCode: 'smoke-channel', telemetry,
   async fetcher(_url, init) {
     const headers = new Headers(init?.headers);
     assert.equal(headers.get('traceparent'), null);
     assert.equal(headers.get('baggage'), null);
     assert.equal(headers.get('vendure-api-key'), 'CANARY_CONTENT');
+    assert.equal(headers.get('vendure-token'), 'smoke-channel-token');
     assert.ok(JSON.parse(String(init?.body)).query.includes('query'));
-    return new Response(JSON.stringify({data:{orders:{totalItems:1,items:[{
+    return new Response(JSON.stringify({data:{activeChannel:{code:'smoke-channel'},orders:{totalItems:1,items:[{
       id:'smoke-order',code:'CANARY_CONTENT',state:'Delivered',active:false,currencyCode:'USD',
       orderPlacedAt:'2026-09-16T00:00:00.000Z',totalWithTax:100,
       customer:{id:'smoke-customer',firstName:'CANARY_CONTENT',lastName:'',emailAddress:'synthetic@example.invalid'},

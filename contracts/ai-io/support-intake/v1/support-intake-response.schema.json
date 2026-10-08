@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/ai-io/support-intake/v1",
+  "title": "SupportIntakeResponseV1",
+  "description": "Discriminated customer-support response. Read-only journeys cannot carry refund workflow proposals.",
+  "oneOf": [
+    { "$ref": "#/$defs/recentOrdersResponse" },
+    { "$ref": "#/$defs/orderStatusResponse" },
+    { "$ref": "#/$defs/orderItemsResponse" },
+    { "$ref": "#/$defs/orderTotalResponse" },
+    { "$ref": "#/$defs/productPolicyResponse" },
+    { "$ref": "#/$defs/clarifyResponse" },
+    { "$ref": "#/$defs/refundProposalReadyResponse" },
+    { "$ref": "#/$defs/refundLegacyResponse" }
+  ],
+  "$defs": {
+    "customerAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": { "message": { "type": "string", "minLength": 1, "maxLength": 2000 } }
+    },
+    "readOnlyBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["journey", "status", "customer_answer"],
+      "properties": {
+        "journey": { "type": "string" },
+        "status": { "type": "string" },
+        "customer_answer": { "$ref": "#/$defs/customerAnswer" }
+      }
+    },
+    "recentOrdersResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "recent_orders" }, "status": { "enum": ["answer_ready", "source_unavailable"] } } }
+      ]
+    },
+    "orderStatusResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "order_status" }, "status": { "enum": ["answer_ready", "awaiting_order_reference", "source_unavailable"] } } }
+      ]
+    },
+    "orderItemsResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "order_items" }, "status": { "enum": ["answer_ready", "awaiting_order_reference", "source_unavailable"] } } }
+      ]
+    },
+    "orderTotalResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "order_total" }, "status": { "enum": ["answer_ready", "awaiting_order_reference", "source_unavailable"] } } }
+      ]
+    },
+    "productPolicyResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "product_policy" }, "status": { "enum": ["answer_ready", "awaiting_product", "source_unavailable"] } } }
+      ]
+    },
+    "clarifyResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/readOnlyBase" },
+        { "type": "object", "properties": { "journey": { "const": "clarify" }, "status": { "const": "clarification_required" } } }
+      ]
+    },
+    "refundBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["journey", "status", "customer_message", "order_reference"],
+      "properties": {
+        "journey": { "const": "refund" },
+        "status": { "type": "string" },
+        "customer_message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "order_reference": { "type": ["string", "null"], "minLength": 1, "maxLength": 100 },
+        "order_context": { "$ref": "https://customer-service-os.example/contracts/tools/order-context/v1" },
+        "refund_proposal": { "$ref": "https://customer-service-os.example/contracts/workflows/proposals/v1/refund-proposal" },
+        "customer_answer": { "$ref": "#/$defs/refundCustomerAnswer" },
+        "error_code": { "type": ["string", "null"], "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "refundCustomerAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "citations": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["knowledge_document_id", "chunk_id"],
+            "properties": {
+              "knowledge_document_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+              "chunk_id": { "type": "string", "minLength": 1, "maxLength": 160 }
+            }
+          }
+        }
+      }
+    },
+    "refundProposalReadyResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/refundBase" },
+        { "type": "object", "required": ["refund_proposal"], "properties": { "status": { "const": "refund_proposal_ready" }, "refund_proposal": true } }
+      ]
+    },
+    "refundLegacyResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/refundBase" },
+        { "type": "object", "properties": { "status": { "enum": ["awaiting_order_reference", "order_context_loaded", "awaiting_refund_details", "intent_extraction_unavailable", "order_not_found", "order_lookup_unavailable"] } } }
+      ]
+    }
+  }
+}

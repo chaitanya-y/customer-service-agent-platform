@@ -16,11 +16,12 @@ from agent_runtime.refund.policy import VerifiedRefundPolicy
 from agent_runtime.refund.presentation import (
     AnswerPurpose,
     append_requested_amount,
+    asks_about_personal_automatic_approval,
     render_customer_answer,
 )
 from agent_runtime.refund.proposal import RefundProposal
 
-REFUND_ANSWER_PROMPT_VERSION = "refund-answer-v9"
+REFUND_ANSWER_PROMPT_VERSION = "refund-answer-v13"
 
 DELIVERY_POLICY_QUALIFICATION = (
     "This is policy information, not confirmation that your request qualifies. "
@@ -49,11 +50,19 @@ Rules:
   or supplied request, preserving any applicable exceptions. Do not list unrelated
   product categories. Keep the response short and direct; do not repeat blanket
   disclaimers that do not help answer the customer's current question.
+- For a final-sale question, do not add an unrelated change-of-mind delivery
+  window. Explain the final-sale exclusion and its cited exceptions directly.
+  If the customer separately asks about a delivery-window rule, preserve every
+  cited condition, including whether an item must be unopened, non-final-sale,
+  returned, and inspected. Never broaden an unopened-item rule to all goods.
 - Select one presentation purpose: refund_request for general request guidance,
   missing_details when asking for required information, amount_review when the
   customer asks how their amount affects review, provider_timing for submission
   or settlement timing, and policy_question for other policy guidance. Purpose
   controls presentation only and never makes a policy decision.
+- If the customer asks whether their own refund can be automatically approved,
+  select amount_review. The application will use verified amount and policy
+  facts to explain the review path; do not write the amount yourself.
 - A reported refund reason is not verified eligibility. Do not conclude that
   this customer's item qualifies for an exception, even if the reported reason
   matches a condition in the policy. Do not assume an item is final-sale from
@@ -184,6 +193,14 @@ PERSONALIZED_PRONOUN_ELIGIBILITY_DENIAL = re.compile(
     r"(?:request|order|item|purchase)\b[^.!?]{0,240}\bit\s+"
     r"(?:(?:does|did)\s+not\s+(?:meet|satisfy)|fails?)\b"
     r"[^.!?]{0,40}\beligib(?:le|ility)\b",
+    re.IGNORECASE,
+)
+PERSONALIZED_REFUND_DENIAL = re.compile(
+    r"\b(?:(?:for|on)\s+)?your\s+(?:order|item|purchase)\b[^.!?]{0,180}\b"
+    r"(?:refunds?\b[^.!?]{0,60}\b(?:would|will|is|are|can|may)\s+not\s+"
+    r"(?:be\s+)?(?:available|allowed|permitted|possible|apply)"
+    r"|(?:cannot|can't|can\s+not)\s+be\s+refunded\b"
+    r"|(?:is|was)\s+not\s+refundable\b)",
     re.IGNORECASE,
 )
 BOUNDED_ELIGIBILITY_UNCERTAINTY = re.compile(
@@ -363,6 +380,7 @@ class LangChainRefundAnswerComposer:
             answer = await self._invoke_model(model_input)
             return self._render_answer(
                 answer,
+                customer_message=customer_message,
                 allowed_citations=allowed_citations,
                 order_context=order_context,
                 knowledge_evidence=knowledge_evidence,
@@ -391,6 +409,7 @@ class LangChainRefundAnswerComposer:
                 ) from error
             return self._render_answer(
                 answer,
+                customer_message=customer_message,
                 allowed_citations=allowed_citations,
                 order_context=order_context,
                 knowledge_evidence=knowledge_evidence,
@@ -433,6 +452,7 @@ class LangChainRefundAnswerComposer:
         self,
         answer: DraftCustomerAnswer,
         *,
+        customer_message: str,
         allowed_citations: set[tuple[str, str]],
         order_context: OrderContext,
         knowledge_evidence: list[CustomerEvidence],
@@ -442,6 +462,12 @@ class LangChainRefundAnswerComposer:
         operation: OperationTelemetry | None = None,
     ) -> CustomerAnswer:
         purpose = answer.purpose
+        if (
+            refund_policy is not None
+            and refund_proposal.intent.requested_amount is not None
+            and asks_about_personal_automatic_approval(customer_message)
+        ):
+            purpose = "amount_review"
         try:
             if any(
                 (citation.knowledge_document_id, citation.chunk_id)
@@ -576,9 +602,11 @@ def _strip_bounded_eligibility_uncertainty(message: str) -> tuple[str, bool]:
 def validate_personalized_eligibility_text(message: str) -> None:
     text, _ = _strip_bounded_eligibility_uncertainty(message)
     text = re.sub(r"[*`]", "", text)
-    if PERSONALIZED_ELIGIBILITY_DECISION.search(
-        text
-    ) or PERSONALIZED_PRONOUN_ELIGIBILITY_DENIAL.search(text):
+    if (
+        PERSONALIZED_ELIGIBILITY_DECISION.search(text)
+        or PERSONALIZED_PRONOUN_ELIGIBILITY_DENIAL.search(text)
+        or PERSONALIZED_REFUND_DENIAL.search(text)
+    ):
         raise RefundAnswerCompositionError(
             RefundAnswerRejectionCode.DELIVERY_AGE_TEXT_REJECTED
         )

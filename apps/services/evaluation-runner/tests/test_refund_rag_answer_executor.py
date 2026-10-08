@@ -269,7 +269,8 @@ def test_refund_rag_executor_reuses_retrieval_and_production_answer_contracts() 
     assert result.versions == {
         "application_facts": "synthetic-refund-facts-v1",
         "answer_model": "fake-answer-model",
-        "answer_prompt": "refund-answer-v9",
+        "answer_prompt": "refund-answer-v13",
+        "answer_presentation": "refund-answer-presentation-v1",
         "embedding_model": "fake:fake-embedding:v1:3",
         "knowledge_release": "refund-policy-2026-08-01",
         "reranker_model": "fake:fake-reranker:v1",
@@ -381,7 +382,8 @@ def test_refund_rag_executor_attaches_privacy_safe_rejected_answer_diagnostic() 
         "versions": {
             "application_facts": "synthetic-refund-facts-v1",
             "answer_model": "fake-answer-model",
-            "answer_prompt": "refund-answer-v9",
+            "answer_prompt": "refund-answer-v13",
+            "answer_presentation": "refund-answer-presentation-v1",
             "embedding_model": "fake:fake-embedding:v1:3",
             "knowledge_release": "refund-policy-2026-08-01",
             "reranker_model": "fake:fake-reranker:v1",

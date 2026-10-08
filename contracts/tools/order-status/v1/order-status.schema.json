@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://customer-service-os.example/contracts/tools/order-status/v1",
+  "title": "OrderStatusV1",
+  "description": "Customer-safe status and tracking for an order owned by the verified customer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "reference", "status", "fulfillments"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "reference": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "status": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "fulfillments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "trackingCode"],
+        "properties": {
+          "status": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "trackingCode": { "type": ["string", "null"], "maxLength": 160 }
+        }
+      }
+    }
+  }
+}

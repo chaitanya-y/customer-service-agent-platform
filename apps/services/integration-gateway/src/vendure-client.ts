@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RequestInstrumentation } from '@cso/observability-node';
+import { toRefundContext } from './refund-context.js';
 
 import type {
   CommerceOrder,
@@ -24,6 +25,7 @@ const orderFields = `
   lines {
     id
     quantity
+    orderPlacedQuantity
     unitPriceWithTax
     linePriceWithTax
     productVariant {
@@ -57,6 +59,7 @@ const orderFields = `
 
 const orderByCodeQuery = `
   query Orders($options: OrderListOptions) {
+    activeChannel { code }
     orders(options: $options) {
       totalItems
       items { ${orderFields} }
@@ -66,6 +69,7 @@ const orderByCodeQuery = `
 
 const orderByIdQuery = `
   query Order($id: ID!) {
+    activeChannel { code }
     order(id: $id) { ${orderFields} }
   }
 `;
@@ -85,7 +89,7 @@ const vendureOrderSchema = z.object({
   active: z.boolean(),
   currencyCode: z.string(),
   orderPlacedAt: z.string().nullable(),
-  totalWithTax: z.number().int(),
+  totalWithTax: z.number().int().nonnegative(),
   customer: z
     .object({
       id: z.string(),
@@ -98,6 +102,7 @@ const vendureOrderSchema = z.object({
     z.object({
       id: z.string(),
       quantity: z.number().int(),
+      orderPlacedQuantity: z.number().int().nonnegative().optional(),
       unitPriceWithTax: z.number().int(),
       linePriceWithTax: z.number().int(),
       productVariant: z.object({
@@ -107,29 +112,28 @@ const vendureOrderSchema = z.object({
       }),
     }),
   ),
-  payments: z
-    .array(
+  // Only explicit arrays establish payment/refund history; null is unavailable, not empty.
+  payments: z.array(
       z.object({
         id: z.string(),
         state: z.string(),
-        amount: z.number().int(),
+        amount: z.number().int().nonnegative(),
         method: z.string(),
         transactionId: z.string().nullable(),
         refunds: z.array(
           z.object({
             id: z.string(),
             state: z.string(),
-            total: z.number().int(),
+            total: z.number().int().nonnegative(),
             lines: z.array(
               z.object({
                 orderLineId: z.string(),
               }),
             ),
           }),
-        ).nullable(),
+        ),
       }),
-    )
-    .nullable(),
+    ),
   fulfillments: z
     .array(
       z.object({
@@ -145,6 +149,7 @@ const vendureOrderSchema = z.object({
 const vendureResponseSchema = z.object({
   data: z
     .object({
+      activeChannel: z.object({ code: z.string().min(1) }),
       orders: z.object({
         totalItems: z.number().int().nonnegative(),
         items: z.array(vendureOrderSchema),
@@ -160,7 +165,7 @@ const vendureResponseSchema = z.object({
     .optional(),
 });
 const vendureOrderByIdResponseSchema = z.object({
-  data: z.object({ order: vendureOrderSchema.nullable() }).optional(),
+  data: z.object({ activeChannel: z.object({ code: z.string().min(1) }), order: vendureOrderSchema.nullable() }).optional(),
   errors: z.array(z.object({ message: z.string() })).optional(),
 });
 
@@ -172,11 +177,13 @@ type Fetcher = (
 type VendureClientOptions = {
   adminApiUrl: string;
   apiKey: string;
+  channelToken: string;
+  expectedChannelCode: string;
   fetcher?: Fetcher;
   telemetry?: RequestInstrumentation;
 };
 
-type LookupFailure = 'http' | 'invalid_payload' | 'graphql' | 'no_data' | 'duplicate';
+type LookupFailure = 'http' | 'invalid_payload' | 'graphql' | 'no_data' | 'duplicate' | 'channel';
 type LookupResult<T> =
   | { status: number; payload: T }
   | { status: number; telemetryError: 'application_error'; failure: LookupFailure };
@@ -191,10 +198,12 @@ async function vendureOrderLookup<T>(
   const headers = {
     'content-type': 'application/json',
     'vendure-api-key': options.apiKey,
+    'vendure-token': options.channelToken,
   };
   const request = async (requestHeaders: Headers): Promise<LookupResult<T>> => {
     const response = await fetcher(options.adminApiUrl, {
       method: 'POST',
+      redirect: 'error',
       headers: requestHeaders,
       body,
     });
@@ -263,16 +272,18 @@ function toCommerceOrder(
       sku: line.productVariant.sku,
       name: line.productVariant.name,
       quantity: line.quantity,
+      ...(line.orderPlacedQuantity !== undefined && line.orderPlacedQuantity > 0
+        ? { orderedQuantity: line.orderPlacedQuantity } : {}),
       unitPrice: money(line.unitPriceWithTax, currency),
       lineTotal: money(line.linePriceWithTax, currency),
     })),
-    payments: (order.payments ?? []).map((payment) => ({
+    payments: order.payments.map((payment) => ({
       id: payment.id,
       status: payment.state,
       amount: money(payment.amount, currency),
       method: normalizeProviderMethod(payment.method),
       transactionReference: payment.transactionId,
-      refunds: (payment.refunds ?? []).map((refund) => ({
+      refunds: payment.refunds.map((refund) => ({
         id: refund.id,
         status: refund.state,
         amount: money(refund.total, currency),
@@ -291,9 +302,13 @@ function toCommerceOrder(
 export function createVendureCommerceProvider(
   options: VendureClientOptions,
 ): CommerceProvider {
+  if (typeof options.channelToken !== 'string' || !options.channelToken.trim()
+    || typeof options.expectedChannelCode !== 'string' || !options.expectedChannelCode.trim()) {
+    throw new Error('Vendure channel binding is required');
+  }
   const fetcher = options.fetcher ?? fetch;
 
-  return {
+  const provider: CommerceProvider = {
     async getOrderByReference(reference) {
       const result = await vendureOrderLookup(options, fetcher, JSON.stringify({
           query: orderByCodeQuery,
@@ -310,7 +325,10 @@ export function createVendureCommerceProvider(
         }), vendureResponseSchema, (payload) => {
           if (payload.errors?.length) return 'graphql';
           if (!payload.data) return 'no_data';
+          if (payload.data.activeChannel.code !== options.expectedChannelCode) return 'channel';
           if (payload.data.orders.totalItems > 1) return 'duplicate';
+          if (payload.data.orders.totalItems !== payload.data.orders.items.length
+            || payload.data.orders.items.some((order) => order.code !== reference)) return 'invalid_payload';
           return undefined;
         });
 
@@ -319,6 +337,7 @@ export function createVendureCommerceProvider(
         if (result.failure === 'no_data') throw new Error('Vendure returned no GraphQL data');
         if (result.failure === 'duplicate') throw new Error('Vendure returned duplicate order references');
         if (result.failure === 'graphql') throw new Error('Vendure returned a GraphQL error');
+        if (result.failure === 'channel') throw new Error('Vendure returned an unexpected channel');
         throw new Error('Vendure returned invalid GraphQL data');
       }
 
@@ -332,13 +351,17 @@ export function createVendureCommerceProvider(
       const result = await vendureOrderLookup(options, fetcher, JSON.stringify({
           query: orderByIdQuery,
           variables: { id: orderId },
-        }), vendureOrderByIdResponseSchema, (payload) => (
-          payload.errors?.length || !payload.data ? 'graphql' : undefined
-        ));
+        }), vendureOrderByIdResponseSchema, (payload) => {
+          if (payload.errors?.length || !payload.data) return 'graphql';
+          if (payload.data.activeChannel.code !== options.expectedChannelCode) return 'channel';
+          if (payload.data.order && payload.data.order.id !== orderId) return 'invalid_payload';
+          return undefined;
+        });
 
       if ('failure' in result) {
         if (result.failure === 'http') throw new Error(`Vendure request failed with HTTP status ${result.status}`);
         if (result.failure === 'graphql') throw new Error('Vendure returned a GraphQL error');
+        if (result.failure === 'channel') throw new Error('Vendure returned an unexpected channel');
         throw new Error('Vendure returned invalid GraphQL data');
       }
 
@@ -348,8 +371,21 @@ export function createVendureCommerceProvider(
       return payload.data.order ? toCommerceOrder(payload.data.order) : null;
     },
     async executeRefund(input) {
+      if (typeof input.orderId !== 'string' || !input.orderId.trim()) return { status: 'FAILED' };
+      // This fresh read binds the payment to the selected channel/order. It is not
+      // an atomic provider-side guard against changes between read and mutation.
+      const order = await provider.getOrderById(input.orderId);
+      if (!order) return { status: 'FAILED' };
+      const payment = order.payments.find((candidate) => candidate.id === input.paymentId);
+      const current = toRefundContext(order, { scope: 'FULL_ORDER', itemIds: [] },
+        { observationId: 'refund-provider-preflight', observedAt: new Date().toISOString() });
+      if (!payment || payment.status.toUpperCase() !== 'SETTLED'
+        || !current.facts.transactionRefundable
+        || !Number.isSafeInteger(input.amount.amountMinor) || input.amount.amountMinor <= 0
+        || input.amount.currency !== current.facts.refundableAmount.currency
+        || input.amount.amountMinor > current.facts.refundableAmount.amountMinor) return { status: 'FAILED' };
       const response = await fetcher(options.adminApiUrl, {
-        method: 'POST', headers: { 'content-type': 'application/json', 'vendure-api-key': options.apiKey },
+        method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', 'vendure-api-key': options.apiKey, 'vendure-token': options.channelToken },
         body: JSON.stringify({ query: refundOrderMutation, variables: { input: { paymentId: input.paymentId, amount: input.amount.amountMinor, reason: input.reason } } }),
       });
       if (!response.ok) throw new Error(`Vendure refund failed with HTTP status ${response.status}`);
@@ -362,4 +398,5 @@ export function createVendureCommerceProvider(
         : { status: 'SUBMITTED' as const, providerRefundId: result.id };
     },
   };
+  return provider;
 }

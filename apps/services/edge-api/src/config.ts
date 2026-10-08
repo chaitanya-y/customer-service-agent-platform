@@ -24,7 +24,10 @@ const configSchema = z
       .min(1_000)
       .max(120_000)
       .default(15_000),
+    HUMAN_CHAT_HANDOFF_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
     HUMAN_OPERATIONS_BASE_URL: z.url().default('http://127.0.0.1:3003'),
+    INTEGRATION_GATEWAY_BASE_URL: z.url().default('http://127.0.0.1:3002'),
+    DELIVERY_REPORT_REQUEST_TIMEOUT_MILLISECONDS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
     EVIDENCE_REQUEST_TIMEOUT_MILLISECONDS: z.coerce.number().int().min(1000).max(60_000).default(30_000),
     TEMPORAL_ADDRESS: z.string().min(1).default('127.0.0.1:7233'),
     TEMPORAL_TASK_QUEUE: z.string().min(1).default('refund-workflows'),
@@ -52,6 +55,10 @@ const configSchema = z
       .string()
       .min(1)
       .default('integration-gateway'),
+    DELIVERY_REPORT_ASSERTION_AUDIENCE: z
+      .string()
+      .min(1)
+      .default('human-operations-delivery-report'),
     AGENT_RUNTIME_CONTEXT_ASSERTION_AUDIENCE: z
       .string()
       .min(1)

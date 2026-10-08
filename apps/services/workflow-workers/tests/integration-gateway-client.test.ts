@@ -74,6 +74,7 @@ test('refreshes trusted refund facts with a Worker assertion', async () => {
 
   const context = await client.fetchRefundContext(input);
 
+  assert.equal(capturedRequest?.redirect, 'error');
   assert.equal(new Headers(capturedRequest?.headers).get('x-cso-workflow-assertion'), 'signed-worker-assertion');
   assert.deepEqual(JSON.parse(String(capturedRequest?.body)), {
     orderId: 'ORDER-123',
@@ -106,14 +107,17 @@ test('refuses to guess an unspecified refund selection', async () => {
 
 test('uses the internal order ID for refund execution and reconciliation', async () => {
   const requests: Array<{ url: string; body: unknown }> = [];
+  const assertions: unknown[] = [];
   const client = createIntegrationGatewayRefundContextClient({
     baseUrl: 'http://gateway.local',
     expectedTenantId: 'tenant-local',
     expectedEnvironmentId: 'local',
-    async signWorkflowAccessAssertion() {
+    async signWorkflowAccessAssertion(assertionInput) {
+      assertions.push(assertionInput);
       return 'signed-worker-assertion';
     },
     async fetchImpl(url, request) {
+      assert.equal(request?.redirect, 'error');
       requests.push({ url: String(url), body: JSON.parse(String(request?.body)) });
       return Response.json({ status: 'SUCCEEDED', providerRefundId: 'refund-001' });
     },
@@ -121,6 +125,8 @@ test('uses the internal order ID for refund execution and reconciliation', async
 
   await client.executeRefund({ ...input, preview });
   await client.reconcileRefund({ ...input, preview });
+
+  assert.deepEqual((assertions[0] as { refundExecution?: unknown }).refundExecution, requests[0]?.body);
 
   assert.deepEqual(requests, [
     {

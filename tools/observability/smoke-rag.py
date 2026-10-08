@@ -8,7 +8,7 @@ from knowledge_rag.api import get_context_verifier, get_customer_evidence_retrie
 from knowledge_rag.config import KnowledgeRetrievalSettings
 from knowledge_rag.customer_evidence import ConfiguredCustomerEvidenceRetriever
 from knowledge_rag.embeddings import DeterministicEmbeddingProvider
-from knowledge_rag.main import app
+from knowledge_rag.main import create_app
 from knowledge_rag.observability import telemetry_runtime
 from knowledge_rag.reranking import DeterministicRerankingProvider
 from knowledge_rag.retrieval_service import KnowledgeRetrievalService
@@ -48,6 +48,10 @@ verifier = HmacKnowledgeRagContextVerifier(
     expected_audience="knowledge-rag",
     expected_tenant_id="smoke-tenant",
     expected_environment_id="local",
+)
+app = create_app(
+    telemetry_runtime,
+    warm_customer_evidence_retriever=lambda _runtime: retriever,
 )
 app.dependency_overrides[get_context_verifier] = lambda: verifier
 app.dependency_overrides[get_customer_evidence_retriever] = lambda: retriever

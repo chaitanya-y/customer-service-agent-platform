@@ -10,6 +10,8 @@ import {
 import { PostgresConversationRepository } from './postgres-conversation-repository.js';
 import { createHmacServiceAssertionVerifier } from './service-assertion.js';
 import { createHmacContextAssertionVerifier } from './trusted-context.js';
+import { createHmacStaffAssertionVerifier } from './staff-assertion.js';
+import { PostgresHandoffService } from './handoff-service.js';
 import { closeFastifyWithin, runWithin } from './observability.js';
 import { getTelemetry } from './telemetry-state.js';
 
@@ -48,6 +50,12 @@ const verifyServiceAssertion = createHmacServiceAssertionVerifier({
   expectedTenantId: config.TENANT_ID,
   expectedEnvironmentId: config.ENVIRONMENT_ID,
 });
+if (config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET && Buffer.from(config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET, 'utf8').equals(messageEncryptionKey)) throw new Error('Conversation staff assertions require a separate key');
+const verifyStaffAssertion = config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET
+  ? createHmacStaffAssertionVerifier({ secret: config.CONVERSATION_STAFF_ASSERTION_HMAC_SECRET, expectedTenantId: config.TENANT_ID, expectedEnvironmentId: config.ENVIRONMENT_ID }) : undefined;
+const handoffService = new PostgresHandoffService(pool,
+  createAesGcmMessageProtector({ key: messageEncryptionKey, keyVersion: config.MESSAGE_ENCRYPTION_KEY_VERSION }),
+  createAesGcmMessageUnprotector({ key: messageEncryptionKey, keyVersion: config.MESSAGE_ENCRYPTION_KEY_VERSION }));
 const app = buildApp({
   verifyContextAssertion,
   verifyServiceAssertion,
@@ -55,6 +63,8 @@ const app = buildApp({
   checkHealth: () => repository.checkHealth(),
   logger: false,
   telemetry,
+  handoffService,
+  ...(verifyStaffAssertion ? { verifyStaffAssertion } : {}),
 });
 
 try {

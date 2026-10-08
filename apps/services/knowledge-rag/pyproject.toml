@@ -21,6 +21,7 @@ dependencies = [
   "opensearch-py>=3,<4",
   "python-dotenv>=1.2,<2",
   "sentence-transformers>=5,<6",
+  "torch==2.13.0",
   "uvicorn[standard]>=0.51,<1",
 ]
 
@@ -33,6 +34,12 @@ dev = [
 
 [tool.uv.sources]
 cso-observability = { path = "../../../packages/python-observability", editable = true }
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux'" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -29,6 +29,7 @@ test('creates a conversation under trusted tenant and customer scope', async () 
     conversationId: TEST_CONVERSATION_ID,
     status: 'OPEN',
     controlMode: 'AI',
+    controlVersion: 1,
   });
   assert.equal(repository.createRecord?.context, TEST_CONTEXT);
   assert.match(repository.createRecord?.canonicalRequestHash ?? '', /^[a-f0-9]{64}$/);
@@ -83,6 +84,40 @@ test('prepares an encrypted assistant record with its Edge service scope', async
     repository.assistantMessageRecord?.protectedMessage,
     TEST_PROTECTED_MESSAGE,
   );
+});
+
+test('refund assistant commit encrypts and binds the exact Temporal start intent', async () => {
+  const repository = new FakeConversationRepository();
+  const protectedTexts: string[] = [];
+  const service = createConversationService({
+    repository,
+    protectMessage: (text) => { protectedTexts.push(text); return TEST_PROTECTED_MESSAGE; },
+    createId: () => TEST_MESSAGE_ID,
+  });
+  const startInput = {
+    workflowId: 'refund-proposal-1', proposal: { proposalId: 'proposal-1', journeyType: 'REFUND' as const,
+      intent: { orderId: 'order-1', reasonCode: 'DAMAGED', scope: 'FULL_ORDER' as const,
+        itemIds: [], requestedAmount: { amountMinor: 100, currency: 'USD' } } },
+    policyVersion: 'refund-policy-v1', access: {
+      tenantId: TEST_SERVICE_CONTEXT.tenantId, environmentId: TEST_SERVICE_CONTEXT.environmentId,
+      subjectCustomerId: TEST_SERVICE_CONTEXT.subjectCustomerId,
+      requestId: 'request-1', traceId: 'trace-1',
+    },
+  };
+  await service.appendAssistantMessage({
+    context: TEST_SERVICE_CONTEXT, conversationId: TEST_CONVERSATION_ID,
+    idempotencyKey: 'assistant-refund-1', clientMessageId: 'assistant-client-1',
+    text: 'I have captured your refund request.', refundWorkflowId: 'refund-proposal-1', refundStartInput: startInput,
+  });
+  assert.equal(protectedTexts[1], JSON.stringify(startInput));
+  assert.equal(repository.assistantMessageRecord?.protectedRefundStartInput, TEST_PROTECTED_MESSAGE);
+  assert.match(repository.assistantMessageRecord?.canonicalRequestHash ?? '', /^[a-f0-9]{64}$/);
+  await assert.rejects(service.appendAssistantMessage({
+    context: TEST_SERVICE_CONTEXT, conversationId: TEST_CONVERSATION_ID,
+    idempotencyKey: 'assistant-refund-2', clientMessageId: 'assistant-client-2',
+    text: 'Changed.', refundWorkflowId: 'refund-proposal-1',
+    refundStartInput: { ...startInput, access: { ...startInput.access, subjectCustomerId: 'other' } },
+  }));
 });
 
 test('prepares an idempotent workflow link scoped to the assistant message', async () => {

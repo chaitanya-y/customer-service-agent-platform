@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { SupportChat } from "../../components/support-chat";
+import { DeliveryIssueForm } from "../../components/delivery-issue-form";
 
 export default async function SupportPage() {
   const cookieStore = await cookies();
@@ -18,7 +19,8 @@ export default async function SupportPage() {
         <span className="cso-brand">Customer Service OS</span>
         <ThemeControl />
       </header>
-      <SupportChat />
+      <SupportChat handoffAvailable={process.env.HUMAN_CHAT_HANDOFF_ENABLED === "true"} />
+      <DeliveryIssueForm />
       <p className="cso-status-note">
         You are using a development-only local customer session.
       </p>

@@ -26,6 +26,12 @@ function refundConsumesBalance(status: string): boolean {
   return normalizedStatus !== 'FAILED' && normalizedStatus !== 'CANCELLED';
 }
 
+function validMoney(value: Money, currency: string): boolean {
+  return value.currency === currency &&
+    Number.isSafeInteger(value.amountMinor) &&
+    value.amountMinor >= 0;
+}
+
 export function toRefundContext(
   order: CommerceOrder,
   selection: RefundSelection,
@@ -42,7 +48,12 @@ export function toRefundContext(
     (total, refund) => total + refund.amount.amountMinor,
     0,
   );
-  const remainingPaymentAmountMinor = payment
+  const paymentMoneyValid = payment !== null && payment !== undefined &&
+    validMoney(order.total, order.total.currency) &&
+    validMoney(payment.amount, order.total.currency) &&
+    payment.refunds.every((refund) => validMoney(refund.amount, order.total.currency)) &&
+    Number.isSafeInteger(consumedAmountMinor);
+  const remainingPaymentAmountMinor = payment && paymentMoneyValid
     ? Math.max(payment.amount.amountMinor - consumedAmountMinor, 0)
     : 0;
   const selectedItems = selection.itemIds.map((itemId) =>
@@ -52,19 +63,31 @@ export function toRefundContext(
     (total, item) => total + (item?.lineTotal.amountMinor ?? 0),
     0,
   );
-  const selectedItemWasRefunded = payment?.refunds.some(
+  const orderItemIds = new Set(order.items.map((item) => item.id));
+  const priorRefundAttributionUnknown = priorRefunds.some(
     (refund) =>
-      refundConsumesBalance(refund.status) &&
+      refund.lineIds.length === 0 ||
+      refund.lineIds.some((lineId) => !orderItemIds.has(lineId)),
+  );
+  const selectedItemWasRefunded = priorRefunds.some(
+    (refund) =>
       refund.lineIds.some((lineId) => selection.itemIds.includes(lineId)),
   );
-  const itemSelectionValid =
-    selection.scope === 'FULL_ORDER' ||
-    (selectedItems.every((item) => item !== undefined) &&
-      selectedItemWasRefunded !== true);
   const selectedMaximumMinor =
     selection.scope === 'FULL_ORDER'
       ? remainingPaymentAmountMinor
       : Math.min(selectedItemTotalMinor, remainingPaymentAmountMinor);
+  const itemSelectionValid =
+    (selection.scope === 'FULL_ORDER' && selection.itemIds.length === 0) ||
+    (selection.scope === 'SELECTED_ITEMS' &&
+      selection.itemIds.length > 0 &&
+      new Set(selection.itemIds).size === selection.itemIds.length &&
+      selectedItems.every((item) => item !== undefined &&
+        validMoney(item.lineTotal, order.total.currency)) &&
+      Number.isSafeInteger(selectedItemTotalMinor) &&
+      selectedMaximumMinor > 0 &&
+      !priorRefundAttributionUnknown &&
+      !selectedItemWasRefunded);
   const facts = {
     source: {
       provider: order.source.provider,
@@ -87,7 +110,7 @@ export function toRefundContext(
     facts: {
       customerVerified: true,
       transactionRefundable:
-        !order.active && payment !== null && remainingPaymentAmountMinor > 0,
+        !order.active && paymentMoneyValid && remainingPaymentAmountMinor > 0,
       itemSelectionValid,
       priorRefundCount: priorRefunds.length,
       refundableAmount: money(

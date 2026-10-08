@@ -77,6 +77,9 @@ def test_disabled_runtime_does_not_export() -> None:
     with runtime.operation("rag.query_embedding"):
         assert runtime.trace_headers() == {}
 
+    with runtime.operation("mcp.lookup_recent_order_references"):
+        assert runtime.trace_headers() == {}
+
     with runtime.model_operation("model.refund_answer") as operation:
         operation.record_provider_usage(
             {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}

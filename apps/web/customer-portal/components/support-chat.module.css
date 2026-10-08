@@ -25,6 +25,65 @@
   max-width: 62ch;
 }
 
+.handoffControls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.handoffStatus {
+  background: var(--accent-soft);
+  border-radius: 9px;
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+}
+
+.handoffStatus strong {
+  color: var(--text-primary);
+}
+
+.handoffButton {
+  background: var(--surface-raised);
+  border: 1px solid var(--accent-primary);
+  border-radius: 9px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 10px 14px;
+}
+
+.handoffButton:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.consultation {
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  gap: 12px;
+  padding: 20px 32px;
+}
+
+.consultation h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.consultation p {
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 75ch;
+}
+
+.consultation button {
+  justify-self: start;
+}
+
 .transcript {
   align-content: start;
   display: grid;
@@ -124,6 +183,19 @@
   width: fit-content;
 }
 
+.workflowButton {
+  background: transparent;
+  border: 1px solid var(--accent-strong);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 12px;
+  width: fit-content;
+}
+
+.workflowButton:disabled { cursor: not-allowed; opacity: 0.6; }
+
 .composer {
   border-top: 1px solid var(--border-subtle);
   display: grid;
@@ -169,6 +241,40 @@
   color: var(--text-secondary);
 }
 
+.addressStatus {
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  gap: 12px;
+  padding: 20px 32px;
+}
+
+.addressStatus h2,
+.addressStatus p {
+  margin: 0;
+}
+
+.addressStatus h2 {
+  font-size: 18px;
+}
+
+.addressStatus p {
+  color: var(--text-secondary);
+}
+
+.addressStatus button {
+  justify-self: start;
+  margin-top: 0;
+}
+
+.addressSummary {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
 .orderReference summary {
   cursor: pointer;
   font-size: 13px;
@@ -206,6 +312,8 @@
   }
 
   .chatHeader,
+  .consultation,
+  .addressStatus,
   .composer,
   .transcript {
     padding-left: 20px;

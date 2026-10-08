@@ -124,6 +124,12 @@ export class FakeConversationRepository implements ConversationRepository {
     if (this.transcriptError) throw this.transcriptError;
     return this.transcript;
   }
+  async resolveRefundStart(record: Parameters<ConversationRepository['resolveRefundStart']>[0]) {
+    return { workflowId: record.workflowId, status: record.status };
+  }
+  async findRefundStart(_context: Parameters<ConversationRepository['findRefundStart']>[0], _conversationId: string, _assistantClientMessageId: string) {
+    return undefined;
+  }
 }
 
 export const TEST_PROTECTED_MESSAGE: ProtectedMessage = {

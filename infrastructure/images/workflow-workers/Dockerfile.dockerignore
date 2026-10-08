@@ -1,0 +1,31 @@
+# Defense in depth for BuildKit; the proof stages an explicit context because
+# legacy Docker may ignore this Dockerfile-specific list.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/services/
+!apps/services/workflow-workers/
+!apps/services/workflow-workers/package.json
+!apps/services/workflow-workers/tsconfig.json
+!apps/services/workflow-workers/src/
+!apps/services/workflow-workers/src/**/*.ts
+!packages/
+!packages/observability-node/
+!packages/observability-node/package.json
+!packages/observability-node/index.mjs
+!packages/observability-node/index.d.mts
+!packages/refund-policy/
+!packages/refund-policy/index.mjs
+!packages/refund-policy/index.d.mts
+!packages/refund-policy/releases.json
+**/.env
+**/.env.*
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

@@ -36,6 +36,33 @@ const order: CommerceOrder = {
   fulfillments: [],
 };
 
+for (const selection of [
+  { scope: 'SELECTED_ITEMS', itemIds: [] },
+  { scope: 'SELECTED_ITEMS', itemIds: ['line-1', 'line-1'] },
+  { scope: 'SELECTED_ITEMS', itemIds: ['line-1', ' line-1 '] },
+  { scope: 'FULL_ORDER', itemIds: ['line-1'] },
+]) {
+  test(`refund context route rejects malformed selection ${JSON.stringify(selection)}`, async (context) => {
+    let orderReads = 0;
+    const app = buildApp({
+      commerceProvider: {
+        async getOrderByReference() { throw new Error('not used'); },
+        async getOrderById() { orderReads += 1; return order; },
+      },
+      verifyContextAssertion: verifyTestContextAssertion,
+    });
+    context.after(() => app.close());
+    const response = await app.inject({
+      method: 'POST', url: '/internal/v1/refund-contexts',
+      headers: { [CONTEXT_ASSERTION_HEADER]: TEST_CONTEXT_ASSERTION },
+      payload: { orderId: '3', selection },
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, 'invalid_refund_context_request');
+    assert.equal(orderReads, 0);
+  });
+}
+
 test('POST /internal/v1/refund-contexts returns trusted refund facts', async (context) => {
   let receivedOrderId: string | undefined;
   const commerceProvider: CommerceProvider = {

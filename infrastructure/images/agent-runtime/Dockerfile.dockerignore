@@ -1,0 +1,30 @@
+# BuildKit defense in depth. The local proof stages an explicit small context
+# because legacy builders may ignore this Dockerfile-specific ignore file.
+**
+!apps/
+!apps/services/
+!apps/services/agent-runtime/
+!apps/services/agent-runtime/pyproject.toml
+!apps/services/agent-runtime/uv.lock
+!apps/services/agent-runtime/agent_runtime/
+!apps/services/agent-runtime/agent_runtime/**/*.py
+!packages/
+!packages/python-observability/
+!packages/python-observability/pyproject.toml
+!packages/python-observability/cso_observability/
+!packages/python-observability/cso_observability/**/*.py
+!packages/refund-policy/
+!packages/refund-policy/releases.json
+**/.env
+**/.env.*
+**/.venv
+**/__pycache__
+**/.npmrc
+**/.git
+**/node_modules
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519

@@ -44,7 +44,7 @@ test('a signed provider event is replay-safe and becomes a pending Temporal deli
     verifyContextAssertion: verifyTestContextAssertion,
     verifyProviderRefundEventSignature: createHmacProviderRefundEventVerifier(secret),
     async verifyWorkflowRefundExecutionAssertion() {
-      return { contextId: 'workflow-1', tenantId: 'tenant-local', environmentId: 'local', subjectCustomerId: 'customer-42', routingEpoch: 1, requestId: 'request-1', traceId: 'trace-1' };
+      return { contextId: 'workflow-1', tenantId: 'tenant-local', environmentId: 'local', subjectCustomerId: 'customer-42', routingEpoch: 1, requestId: 'request-1', traceId: 'trace-1', refundExecution: { orderId: '3', reasonCode: 'DAMAGED', amount: { amountMinor: 5_000, currency: 'USD' }, selection: { scope: 'FULL_ORDER', itemIds: [] }, previewId: 'preview-1', idempotencyKey: 'refund:workflow-1:preview-1' } };
     },
   });
   context.after(() => app.close());

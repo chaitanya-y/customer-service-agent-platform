@@ -30,6 +30,8 @@ export type IntakeRefund = (
   assertions: AgentRuntimeContextAssertions,
 ) => Promise<AgentRuntimeResponse>;
 
+export type IntakeSupport = IntakeRefund;
+
 type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit,
@@ -54,15 +56,14 @@ export function createAgentRuntimeClient({
   timeoutMilliseconds = 10_000,
   fetchImpl = fetch,
   telemetry,
-}: AgentRuntimeClientOptions): { intakeRefund: IntakeRefund } {
+}: AgentRuntimeClientOptions): { intakeRefund: IntakeRefund; intakeSupport: IntakeSupport } {
   if (!Number.isInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
     throw new Error('Agent Runtime timeout must be a positive integer');
   }
 
-  const endpoint = new URL('/refunds/intake', baseUrl);
-
-  return {
-    async intakeRefund(request, assertions) {
+  const createIntake = (path: string): IntakeRefund => {
+    const endpoint = new URL(path, baseUrl);
+    return async (request, assertions) => {
       try {
         const headers = {
           'content-type': 'application/json',
@@ -72,6 +73,7 @@ export function createAgentRuntimeClient({
         };
         const performRequest = (outgoingHeaders: Headers) => fetchImpl(endpoint, {
           method: 'POST',
+          redirect: 'error',
           headers: outgoingHeaders,
           body: JSON.stringify(request),
           signal: AbortSignal.timeout(timeoutMilliseconds),
@@ -91,6 +93,11 @@ export function createAgentRuntimeClient({
       } catch (error) {
         throw new AgentRuntimeUnavailableError();
       }
-    },
+    };
+  };
+
+  return {
+    intakeRefund: createIntake('/refunds/intake'),
+    intakeSupport: createIntake('/support/intake'),
   };
 }

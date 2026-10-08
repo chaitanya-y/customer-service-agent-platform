@@ -9,6 +9,7 @@ from agent_runtime.integrations.customer_evidence import (
     CustomerEvidenceLookupUnauthorizedError,
 )
 from agent_runtime.integrations.order_lookup import (
+    InvalidOrderContextError,
     OrderLookup,
     OrderLookupError,
     OrderLookupUnauthorizedError,
@@ -98,6 +99,8 @@ def create_lookup_order_node(order_lookup: OrderLookup):
 
         try:
             order_context = await order_lookup.lookup_order(order_reference)
+            if order_context.reference != order_reference.strip():
+                raise InvalidOrderContextError()
         except OrderLookupUnauthorizedError:
             raise
         except OrderNotFoundError as error:

@@ -105,6 +105,8 @@ function nextActionFor(stage: JourneyStage): RefundJourneyView['next_action'] {
       return { type: 'WAIT_FOR_REFUND', label: 'We are processing your request' };
     case 'MORE_INFORMATION_NEEDED':
       return { type: 'CONTACT_SUPPORT', label: 'Please contact support for more information' };
+    case 'REFUND_FAILED':
+      return { type: 'CONTACT_SUPPORT', label: 'Contact support to review this refund request' };
     default:
       return { type: 'NONE', label: 'No action is needed' };
   }

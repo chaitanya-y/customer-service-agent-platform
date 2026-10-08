@@ -1,13 +1,27 @@
 # Codex Handoff
 
-Last updated: 2026-10-02
+Last updated: 2026-10-08
 
-## Current uncommitted local checkpoint
+## Current local checkpoint
+
+The October 8 precommit check covered the platform code on `dev`, excluding the
+ignored storefront and local `.superpowers/` state. All six Node service test
+suites passed after allowing loopback networking for test servers. Customer
+Portal passed 153 tests, Operations Console 74, and canonical contracts 112.
+Agent Runtime passed 626 Python tests, Knowledge/RAG 155, and Evaluation Runner
+324. Service and frontend typechecks and builds, protocol lint, and Python Ruff
+checks passed. The separate Vendure simulator suite passed 27 tests with one
+explicitly skipped SQLite concurrency case: a separately successful Admin
+fulfillment can disappear when a cancellation transaction rolls back under its
+cached SQLite QueryRunner. This is a known local provider-test limitation, not
+evidence that the race is safe in production. No paid model call, refund, AWS
+deployment, browser end-to-end run, or live multi-service startup was part of
+this precommit check.
 
 The real repository is the `customer-service-OS-lite` checkout on `dev`, not
-the older `Customer-Service-OS` folder. It has extensive pre-existing dirty
-work; preserve it and do not stage everything, reset, or infer that these
-October changes are on `main`. The current journey boundaries are in
+the older `Customer-Service-OS` folder. Inspect the working tree before new
+work; preserve local state and do not infer that these October changes are on
+`main`. The current journey boundaries are in
 [NEXT_JOURNEY_BOUNDARIES.md](NEXT_JOURNEY_BOUNDARIES.md) and exact checks in
 [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md).
 
@@ -141,7 +155,8 @@ authenticated local Edge backend chat passed after Agent Runtime restart;
 browser rendering and an independent provider-row audit remain pending. All
 three Agent Runtime MCP clients now accept the same configurable private
 Gateway URL, but cross-container communication remains unverified. This
-work is uncommitted and did not touch the unrelated ignored demo app.
+work was uncommitted at that checkpoint and did not touch the unrelated
+ignored demo app.
 
 Knowledge/RAG's DOCX parser-v1 now rejects sources with top-level tables
 instead of publishing incomplete paragraph-only evidence. The full parser
@@ -188,7 +203,7 @@ rejected a signed non-expiring synthetic token on read-only requests. This
 does not solve production OIDC or identity-bound web sessions; see
 [the identity roadmap](PRODUCTION_IDENTITY_ROADMAP.md).
 
-The latest offline checks include Human Operations 98 passed with 10 optional
+The October 2 offline checks included Human Operations 98 passed with 10 optional
 database tests skipped when its test URL was unset (an earlier isolated
 PostgreSQL delivery-closure run passed 74/74), Edge 171/171, Customer Portal
 153/153, Operations Console 74/74,
@@ -201,11 +216,10 @@ check. No AWS deployment, production identity, real payment provider,
 official Tau-bench run, or LangSmith export is claimed. Do not use the older
 checkpoint below as current branch status.
 
-The `dev` checkout remains heavily dirty (414 modified/untracked paths at the
-2026-10-02 read). These include work predating the current autonomous pass.
-Nothing in this pass was committed, pushed, merged, reset, or discarded; do
-not stage all changes indiscriminately. Unrelated ignored demo-app files remain
-outside the intended core-project commit scope.
+At the 2026-10-02 read, the `dev` checkout had 414 modified/untracked paths,
+including work predating that autonomous pass. Nothing in that pass was
+committed, pushed, merged, reset, or discarded. The unrelated ignored demo app
+and local runtime state remain outside the core-project commit scope.
 
 An [AWS readiness audit](AWS_DEPLOYMENT_READINESS.md) confirms that production
 identity, the remaining application images/IaC, cloud search integration, durable cloud
